@@ -43,6 +43,59 @@ def _gate_metrics(eval_result: dict) -> dict:
     return result
 
 
+def judge_draft(
+    question: str,
+    draft: str,
+    contexts: list[str],
+    expected_output: str | None = None,
+) -> dict:
+    """Score a single draft with the cross-family judge and return a gate verdict.
+
+    This is the shared judge entry point used by the A2A Judge agent. It reuses
+    the exact gating rules from the guard loop (faithfulness + answer-relevancy)
+    and additionally surfaces the correctness GEval score, so the returned
+    ``score`` dict carries all three signals the protocol promises.
+
+    Returns ``{"score": {...}, "passed": bool | None, "feedback": str | None,
+    "enabled": bool, "metrics": {...}}``. ``passed`` is ``None`` only when no
+    gating metric carried a boolean pass signal (judge unavailable or skipped),
+    mirroring the guard loop's "never gate on a signal it does not have" rule.
+    """
+    from src.rag.live_eval import evaluate_answer  # deferred import stays testable
+
+    eval_result = evaluate_answer(
+        question, draft, contexts, expected_output=expected_output
+    )
+    gated = _gate_metrics(eval_result)
+    counted = {
+        key: val for key, val in gated.items() if val["passed"] is not None
+    }
+    passed = all(val["passed"] for val in counted.values()) if counted else None
+
+    score: dict[str, float | None] = {
+        key: val["score"] for key, val in gated.items()
+    }
+
+    metrics = eval_result.get("metrics", {}) if isinstance(eval_result, dict) else {}
+    correctness = metrics.get("correctness", {}) if isinstance(metrics, dict) else {}
+    if isinstance(correctness, dict) and "score" in correctness:
+        score["correctness"] = correctness.get("score")
+
+    reasons = []
+    for key, val in gated.items():
+        if val["passed"] is False and val["reason"]:
+            reasons.append(f"{key}: {val['reason']}")
+    feedback = " ".join(reasons) if reasons else None
+
+    return {
+        "score": score,
+        "passed": passed,
+        "feedback": feedback,
+        "enabled": bool(eval_result.get("enabled", False)),
+        "metrics": metrics,
+    }
+
+
 def guarded_answer(
     strategy: str,
     question: str,

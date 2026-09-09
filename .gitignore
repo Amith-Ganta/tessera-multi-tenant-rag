@@ -14,6 +14,7 @@ evals/reports/*.json
 # Runtime data — never commit
 tessera_users.db
 *.db
+*.sqlite3
 logs/
 
 # Scratch generation dumps

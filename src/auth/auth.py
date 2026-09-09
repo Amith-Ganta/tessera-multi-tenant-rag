@@ -26,7 +26,8 @@ def init_db() -> None:
                 email TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_login TIMESTAMP
+                last_login TIMESTAMP,
+                is_admin INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS user_sessions (
@@ -51,6 +52,12 @@ def init_db() -> None:
             );
             """
         )
+        # Migration for databases created before is_admin existed. CREATE TABLE
+        # IF NOT EXISTS will not add a column to a table that already exists, so
+        # older files would otherwise keep an admin check that cannot be answered.
+        cols = {row[1] for row in c.execute("PRAGMA table_info(users)").fetchall()}
+        if "is_admin" not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
         conn.commit()
     finally:
         conn.close()
@@ -230,7 +237,41 @@ def tenant_slug(user_id: int) -> str:
 
 
 def is_admin(email: str | None) -> bool:
-    return email is not None and email.strip().lower() == ADMIN_EMAIL.strip().lower()
+    """Admin status is a property of the row, not of the address.
+
+    The previous version compared the caller's email against ADMIN_EMAIL, so
+    anyone who registered that address was handed the analytics endpoint, which
+    returns every tenant's questions and answers. The flag now has to be set on
+    the row by promote_admin(), which no signup path calls.
+    """
+    if not email:
+        return False
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        c = conn.cursor()
+        c.execute("SELECT is_admin FROM users WHERE email = ?", (email.strip().lower(),))
+        row = c.fetchone()
+        return bool(row and row[0])
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+
+
+def promote_admin(email: str) -> bool:
+    """Grant admin to an existing account. Deliberately not exposed over HTTP."""
+    if not email:
+        return False
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        c = conn.cursor()
+        c.execute("UPDATE users SET is_admin = 1 WHERE email = ?", (email.strip().lower(),))
+        conn.commit()
+        return c.rowcount > 0
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
 
 
 if not DB_PATH.exists():

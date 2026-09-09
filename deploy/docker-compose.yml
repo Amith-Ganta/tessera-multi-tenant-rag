@@ -11,6 +11,38 @@ services:
       - "8000:8000"
     env_file:
       - ../.env
+    environment:
+      # Point the A2A supervisor at the dedicated Drafter/Judge agent services.
+      TESSERA_DRAFTER_URL: "http://drafter-agent:8001"
+      TESSERA_JUDGE_URL: "http://judge-agent:8002"
+      TESSERA_A2A_MODE: "http"
+    depends_on:
+      - drafter-agent
+      - judge-agent
+    restart: unless-stopped
+
+  drafter-agent:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: tessera-drafter-agent:local
+    command: uv run python -m src.agents.drafter_agent
+    ports:
+      - "8001:8001"
+    env_file:
+      - ../.env
+    restart: unless-stopped
+
+  judge-agent:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: tessera-judge-agent:local
+    command: uv run python -m src.agents.judge_agent
+    ports:
+      - "8002:8002"
+    env_file:
+      - ../.env
     restart: unless-stopped
 
   frontend:

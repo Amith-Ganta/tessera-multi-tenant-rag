@@ -127,6 +127,11 @@ class AskRequest(BaseModel):
     run_eval: bool = False
     expected_output: str | None = None
     force_route: str | None = None
+    # A2A orchestration: an optional client thread id makes the workflow
+    # resumable via the SQLite checkpointer; use_a2a forces the A2A supervisor
+    # path even without a thread id.
+    thread_id: str | None = None
+    use_a2a: bool = False
 
 
 class AskResponse(BaseModel):
@@ -142,6 +147,8 @@ class AskResponse(BaseModel):
     eval: dict | None = None
     guard: dict | None = None
     trace: list[str]
+    thread_id: str | None = None
+    transcript: list[dict] | None = None
 
 
 app = FastAPI(title="Tessera Multi-Tenant RAG API")
@@ -258,6 +265,102 @@ async def upload_file(
     }
 
 
+def _run_a2a(
+    payload: AskRequest,
+    tenant: str,
+    user_id: int,
+    email: str,
+    strategy: str,
+    model: str,
+    top_k: int,
+) -> AskResponse:
+    """Route /ask through the A2A supervisor (Drafter -> Judge with checkpointer).
+
+    The supervisor persists state to SQLite after every step, so a request that
+    carries a ``thread_id`` can be resumed after a pod restart or provider
+    fallback. The full Drafter/Judge exchange is returned in ``transcript``.
+    """
+    from src.orchestrator.a2a_supervisor import A2ASupervisor
+
+    start = time.perf_counter()
+    supervisor = A2ASupervisor(model=model, top_k=top_k)
+    a2a = supervisor.process_question(
+        payload.question,
+        tenant,
+        thread_id=payload.thread_id,
+        run_eval=payload.run_eval,
+        expected_output=payload.expected_output,
+    )
+    latency_ms = (time.perf_counter() - start) * 1000
+
+    transcript = a2a.get("transcript", []) or []
+    final_scores: dict = {}
+    for entry in reversed(transcript):
+        if isinstance(entry, dict) and entry.get("role") == "judge":
+            final_scores = entry.get("score", {}) or {}
+            break
+
+    guard = {
+        "enabled": payload.run_eval,
+        "passed": a2a.get("passed"),
+        "attempts": a2a.get("attempts", 0),
+        "max_retries": a2a.get("max_retries", 2),
+        "final_scores": final_scores,
+        "note": a2a.get("note", ""),
+    }
+
+    try:
+        auth.log_query(
+            user_id,
+            payload.question,
+            a2a.get("answer", ""),
+            a2a.get("route", ""),
+            0,
+            0.0,
+        )
+    except Exception:
+        pass
+
+    try:
+        log_analytics({
+            "timestamp": int(time.time()),
+            "user_id": user_id,
+            "email": email,
+            "tenant": tenant,
+            "question": payload.question,
+            "answer": a2a.get("answer", ""),
+            "route": a2a.get("route", ""),
+            "strategy": "a2a",
+            "model": model,
+            "top_k": top_k,
+            "tokens": {"prompt": 0, "completion": 0, "total": 0},
+            "estimated_cost_usd": 0.0,
+            "latency_ms": latency_ms,
+            "eval": None,
+            "guard": guard,
+            "trace": a2a.get("trace", []) or [],
+        })
+    except Exception:
+        pass
+
+    return AskResponse(
+        answer=a2a.get("answer", ""),
+        route=a2a.get("route", ""),
+        strategy="a2a",
+        model=model,
+        sources=a2a.get("sources", []) or [],
+        latency_ms=latency_ms,
+        tokens={"prompt": 0, "completion": 0, "total": 0},
+        estimated_cost_usd=0.0,
+        tenant=tenant,
+        eval=None,
+        guard=guard,
+        trace=a2a.get("trace", []) or [],
+        thread_id=a2a.get("thread_id"),
+        transcript=transcript,
+    )
+
+
 @app.post("/ask", response_model=AskResponse)
 def ask(payload: AskRequest, user: tuple[int, str] = Depends(get_current_user)) -> AskResponse:
     user_id, email = user
@@ -300,6 +403,13 @@ def ask(payload: AskRequest, user: tuple[int, str] = Depends(get_current_user)) 
     fr = payload.force_route or DEFAULT_FORCE_ROUTE
     if fr not in allowed:
         fr = "auto"
+
+    # A2A orchestration path: when the caller asks for it (or supplies a
+    # resumable thread_id), hand the request to the A2A supervisor, which drives
+    # the standalone Drafter and Judge agents over the A2A protocol and persists
+    # state to the SQLite checkpointer after every step.
+    if payload.use_a2a or payload.thread_id is not None:
+        return _run_a2a(payload, tenant, user_id, email, strategy, model, top_k)
 
     start = time.perf_counter()
     with trace_run(strategy, payload.question, tenant) as run_span:

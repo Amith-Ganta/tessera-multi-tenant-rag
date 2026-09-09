@@ -1,0 +1,126 @@
+{
+  "timestamp": "2026-09-09T03:33:35.160713+00:00",
+  "note": "Offline metrics (checkpointer, A2A protocol, fallback recovery) are measured directly. Live LLM metrics are null unless API keys and a built index were present at run time.",
+  "checkpointer": {
+    "write": {
+      "n": 50,
+      "avg_sec": 0.115764,
+      "p95_sec": 0.25597,
+      "min_sec": 0.024052,
+      "max_sec": 0.385049
+    },
+    "read": {
+      "n": 50,
+      "avg_sec": 0.128952,
+      "p95_sec": 0.37283,
+      "min_sec": 0.021997,
+      "max_sec": 0.491133
+    },
+    "delete": {
+      "n": 50,
+      "avg_sec": 0.01011,
+      "p95_sec": 0.021055,
+      "min_sec": 0.004039,
+      "max_sec": 0.062862
+    },
+    "roundtrip_verified": true,
+    "db": "C:\\Users\\HP\\AppData\\Local\\Temp\\tmpma50ztai\\checkpoints.sqlite3"
+  },
+  "a2a_protocol": {
+    "drafter_roundtrip": {
+      "n": 25,
+      "avg_sec": 0.181503,
+      "p95_sec": 0.627453,
+      "min_sec": 0.012998,
+      "max_sec": 0.668583
+    },
+    "judge_roundtrip": {
+      "n": 25,
+      "avg_sec": 0.163233,
+      "p95_sec": 0.569983,
+      "min_sec": 0.011451,
+      "max_sec": 0.646344
+    },
+    "agent_card_discovery_ok": true
+  },
+  "fallback_recovery": {
+    "recovery": {
+      "n": 10,
+      "avg_sec": 5e-06,
+      "p95_sec": 6e-06,
+      "min_sec": 5e-06,
+      "max_sec": 6e-06
+    },
+    "total_including_detection": {
+      "n": 10,
+      "avg_sec": 2.305693,
+      "p95_sec": 2.48974,
+      "min_sec": 2.150079,
+      "max_sec": 2.48974
+    },
+    "fallback_events": 10
+  },
+  "live_end_to_end": {
+    "ran": true,
+    "tenant": "user-guardproof",
+    "questions_run": 3,
+    "errors": [],
+    "passed_count": 3,
+    "unverified_count": 0,
+    "e2e_latency": {
+      "count": 3,
+      "avg_sec": 364.403884,
+      "p95_sec": 552.29714
+    },
+    "drafter_latency": {
+      "count": 3,
+      "avg_sec": 146.104334,
+      "p95_sec": 371.015106
+    },
+    "judge_latency": {
+      "count": 3,
+      "avg_sec": 218.117158,
+      "p95_sec": 305.835134
+    },
+    "checkpointer_write_latency": {
+      "count": 12,
+      "avg_sec": 0.04079,
+      "p95_sec": 0.106714
+    },
+    "checkpointer_read_latency": {
+      "count": 3,
+      "avg_sec": 0.069133,
+      "p95_sec": 0.098568
+    },
+    "success_rate_pct": 100.0,
+    "retry_rate_pct": 0.0,
+    "unverified_rate_pct": 0.0,
+    "fallback_events": 0,
+    "per_question": [
+      {
+        "question": "What does least privilege mean in IAM?",
+        "passed": true,
+        "attempts": 1,
+        "retries_used": null,
+        "answer_length": 317,
+        "note": "gated PASS after 1 attempt(s)"
+      },
+      {
+        "question": "What is encryption at rest?",
+        "passed": true,
+        "attempts": 1,
+        "retries_used": null,
+        "answer_length": 349,
+        "note": "gated PASS after 1 attempt(s)"
+      },
+      {
+        "question": "What does encryption in transit protect against?",
+        "passed": true,
+        "attempts": 1,
+        "retries_used": null,
+        "answer_length": 186,
+        "note": "gated PASS after 1 attempt(s)"
+      }
+    ]
+  }
+}

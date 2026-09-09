@@ -23,6 +23,11 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "streamlit>=1.40.0",
     "requests>=2.32.0",
+    # Official Google Agent-to-Agent (A2A) protocol SDK. The in-tree agents
+    # implement the A2A wire format (AgentCard + JSON-RPC message/send) directly
+    # so they run on the current lockfile; this SDK is declared for teams that
+    # prefer the official client. Re-run `uv lock` after adding it.
+    "a2a-sdk>=0.3.0",
 ]
 
 [tool.uv]

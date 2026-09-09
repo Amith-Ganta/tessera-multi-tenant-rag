@@ -1,0 +1,13 @@
+# Supplementary pip requirements for teams that prefer pip over uv.
+#
+# The project's primary dependency manifest is pyproject.toml (managed with uv).
+# The official Google A2A SDK is declared there as well; this file mirrors it so
+# a plain `pip install -r requirements.txt` also works.
+#
+# NOTE: the in-tree A2A agents implement the A2A wire format (AgentCard +
+# JSON-RPC 2.0 message/send) directly and do NOT import this SDK, so the app
+# runs even before this package is installed.
+
+a2a-sdk>=0.3.0
+# Alternative community implementation (uncomment to use instead):
+# python-a2a>=0.3.0

@@ -134,6 +134,54 @@ graph TD
 
 When the loop exhausts its retries, it returns the best attempt and marks it as unverified rather than pretending it passed. The judge's own reason string becomes the feedback for the next attempt, so a refinement is targeted at the actual failure rather than a blind retry.
 
+### Agent-to-Agent (A2A) orchestration and durable checkpoints
+
+The guard loop is also exposed as an **official Google A2A (Agent-to-Agent)** protocol workflow, with the Drafter and Judge running as standalone A2A agent servers and a supervisor orchestrating them over the wire.
+
+- **`src/agents/drafter_agent.py`** — an A2A server exposing the `draft_answer` skill. It accepts `question`, `tenant_slug`, `feedback`, and `previous_draft`, scopes retrieval to the tenant, and returns `{"draft", "context", "tenant"}`.
+- **`src/agents/judge_agent.py`** — an A2A server exposing the `judge_answer` skill. It reuses the guard's judge logic (`src/rag/answer_guard.judge_draft`) to score faithfulness, correctness, and relevancy, and returns `{"score", "passed", "feedback"}`.
+- **`src/orchestrator/a2a_supervisor.py`** — the A2A client that drives `Drafter -> Judge -> Feedback -> Refine` (max 2 retries), returns the final answer plus the full transcript, and falls back to in-process execution of the same skills if an agent is unreachable.
+- **`src/rag/checkpointer.py`** — a `SQLiteCheckpointer` that persists the full workflow state (transcript, retries, last draft, question, tenant, created-at) as a JSON document keyed by `thread_id`.
+
+The A2A protocol is implemented directly against the specification — **AgentCard discovery** at `GET /.well-known/agent.json` and **JSON-RPC 2.0** `message/send` at `POST /` — so the agents interoperate with any standards-compliant A2A client while running on the project's existing dependency set. The official `a2a-sdk` is declared in `pyproject.toml`/`requirements.txt` for teams that prefer the SDK client.
+
+#### Why a SQLite checkpointer?
+
+The previous loop kept all state in memory: a pod restart, a provider fallback (DeepSeek -> OpenAI), or a long-running workflow silently dropped the transcript and retry count. The checkpointer makes the workflow **resumable** — the supervisor saves state before every LLM call and after every agent response, and on a provider failure it reloads the last saved state and retries from there. When a request supplies a `thread_id`, `/ask` resumes that exact thread instead of starting over.
+
+```mermaid
+graph TD
+    CLIENT["/ask?question&tenant_slug&thread_id"] --> SUP["A2A Supervisor"]
+    SUP -->|message/send| DRAFTER["Drafter Agent<br/>:8001 · draft_answer"]
+    DRAFTER -->|draft + context| SUP
+    SUP -->|message/send| JUDGE["Judge Agent<br/>:8002 · judge_answer"]
+    JUDGE -->|score, passed, feedback| SUP
+    SUP -->|"failed & retries < 2"| FEEDBACK["Refine with judge feedback"]
+    FEEDBACK --> DRAFTER
+    SUP <--> CK["SQLite Checkpointer<br/>data/checkpoints.sqlite3"]
+    SUP -->|final answer + transcript| CLIENT
+
+    style DRAFTER fill:#3b82f6,stroke:#1e40af,color:#fff
+    style JUDGE fill:#06b6d4,stroke:#0891b2,color:#fff
+    style SUP fill:#f59e0b,stroke:#d97706,color:#fff
+    style CK fill:#10b981,stroke:#059669,color:#fff
+```
+
+To run the two agents and point the API at them:
+
+```bash
+# Terminal 1: Drafter agent
+uv run python -m src.agents.drafter_agent          # port 8001
+
+# Terminal 2: Judge agent
+uv run python -m src.agents.judge_agent            # port 8002
+
+# Terminal 3: API (A2A enabled)
+TESSERA_A2A_MODE=http uv run uvicorn src.api.app:app --reload --port 8000
+```
+
+Then call `/ask` with `"use_a2a": true` (or pass a `thread_id` to resume a checkpointed thread). With `docker compose -f deploy/docker-compose.yml up`, the `drafter-agent` and `judge-agent` services start automatically and the API reaches them over the Compose network.
+
 ### Tenant isolation
 
 Isolation is enforced at the data and index layer. Each tenant gets its own corpus directory and its own Chroma collection, scoped through a `use_tenant()` context. A tenant slug is validated against `[a-z0-9_-]` before it can touch a path, so a slug cannot escape its directory.
@@ -185,10 +233,17 @@ The repository follows a conventional application layout: all importable code li
 │   │   ├── reranker.py            # cross-encoder rerank
 │   │   ├── answer_guard.py        # generate to verify to refine loop
 │   │   ├── judge.py               # judge-model scoring wrapper
+│   │   ├── checkpointer.py        # SQLite resumable workflow state
 │   │   ├── orchestrator.py        # LangGraph state machine
 │   │   ├── ingest.py              # corpus to Chroma index
 │   │   ├── tenant_context.py      # per-tenant scoping
 │   │   └── ...                    # llm, config, models, analytics, observability
+│   ├── agents/
+│   │   ├── drafter_agent.py       # A2A Drafter server (draft_answer skill)
+│   │   ├── judge_agent.py         # A2A Judge server (judge_answer skill)
+│   │   └── a2a_protocol.py        # AgentCard + JSON-RPC 2.0 helpers
+│   ├── orchestrator/
+│   │   └── a2a_supervisor.py      # A2A Drafter -> Judge -> refine loop
 │   └── ui/
 │       ├── app_streamlit_auth.py  # authenticated multi-tenant UI
 │       └── app_streamlit.py       # earlier single-tenant demo
@@ -345,6 +400,8 @@ TESSERA_DB_PATH=/data/tessera_users.db
 | Sparse retrieval | BM25 (rank_bm25) | exact-term matching, no external service |
 | Rerank | cross-encoder ms-marco-MiniLM-L-6-v2 | local, no API cost |
 | Orchestration | LangGraph | explicit state machine for the guard loop |
+| A2A protocol | AgentCard + JSON-RPC 2.0 | official Agent-to-Agent wire format for Drafter/Judge |
+| Checkpointing | SQLite (JSON documents) | resumable workflows across restarts and fallback |
 | Evaluation | DeepEval + gpt-4o-mini judge | cross-family judge, committed reports |
 | Frontend | Streamlit | fast to build, auth-ready |
 | Auth | SQLite + PBKDF2 | no external dependency for a demo |
