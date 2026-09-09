@@ -43,6 +43,26 @@ Notes on the honest edges of this table:
 
 The CI gate (`evals/gate.py`) checks the aggregate, not the per-case pass rate: it requires mean relevancy at or above 0.6 and mean correctness at or above 0.5. The current run clears both.
 
+### A2A and operations metrics
+
+The A2A orchestration layer and the SQLite checkpointer are measured by `evals/a2a_metrics.py`, whose output is committed at `evals/reports/a2a_implementation_metrics.json`. The live numbers below come from a 3-question run against the `user-guardproof` tenant (the full 12-file compliance corpus), with the real Drafter and Judge agents.
+
+| Metric | Value | Source |
+|--------|-------|--------|
+| A2A success rate | **100%** (3/3 passed) | `a2a_implementation_metrics.json` |
+| A2A retry rate | **0%** | `a2a_implementation_metrics.json` |
+| A2A unverified rate | **0%** | `a2a_implementation_metrics.json` |
+| Checkpointer write latency | ~0.04 s avg (12 samples) | `a2a_implementation_metrics.json` |
+| Checkpointer read latency | ~0.07 s avg (3 samples) | `a2a_implementation_metrics.json` |
+| Fallback recovery time | ~2.3 s (full detect → recover) | `a2a_implementation_metrics.json` |
+| Judge call latency | ~218 s avg (5–7 DeepEval metrics) | `a2a_implementation_metrics.json` |
+| Drafter call latency | ~146 s avg (retrieve + rerank + generate) | `a2a_implementation_metrics.json` |
+| Avg cost per question | $0.00025 | `metrics_summary.json` |
+| Avg / p95 latency | 11.2 s / 13.9 s (router-on) | `metrics_summary.json` |
+| Tenant isolation | `isolation_holds: true`, 0 cross-tenant reads | `tenancy_isolation.json` |
+
+Two honest read-outs from that table: the **judge dominates end-to-end latency** (DeepEval runs 5–7 gpt-4o-mini metrics sequentially per attempt), and **fallback recovery is dominated by failure detection**, not by the in-process retry itself. Both are called out in the deep-dive below rather than hidden.
+
 ---
 
 ## Architecture
@@ -167,6 +187,45 @@ graph TD
     style CK fill:#10b981,stroke:#059669,color:#fff
 ```
 
+The exchange between the supervisor and the two agents, including checkpointing, is:
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant S as A2A Supervisor
+    participant D as Drafter Agent
+    participant J as Judge Agent
+    participant C as SQLite Checkpointer
+
+    U->>S: POST /ask {question, tenant_slug, thread_id?}
+    S->>C: load_state(thread_id)
+    C-->>S: state or None (resume point)
+
+    loop up to MAX_RETRIES + 1 attempts
+        S->>C: save_state (before drafter call)
+        S->>D: message/send draft_answer(question, feedback, previous_draft)
+        D->>D: hybrid retrieve + rerank + generate
+        D-->>S: {draft, context, tenant}
+        S->>C: save_state (after drafter response)
+
+        S->>J: message/send judge_answer(draft, context, question)
+        J->>J: score faithfulness + relevancy + correctness
+        J-->>S: {score, passed, feedback}
+        S->>C: save_state (after judge response)
+
+        alt passed
+            S-->>U: final answer + transcript
+        else not passed and retries left
+            S->>S: refine (feed judge reason back)
+            Note over S: loop again with feedback
+        else retries exhausted
+            S-->>U: best-effort answer flagged unverified
+        end
+    end
+
+    S->>C: delete_state(thread_id) on completion
+```
+
 To run the two agents and point the API at them:
 
 ```bash
@@ -181,6 +240,18 @@ TESSERA_A2A_MODE=http uv run uvicorn src.api.app:app --reload --port 8000
 ```
 
 Then call `/ask` with `"use_a2a": true` (or pass a `thread_id` to resume a checkpointed thread). With `docker compose -f deploy/docker-compose.yml up`, the `drafter-agent` and `judge-agent` services start automatically and the API reaches them over the Compose network.
+
+### Why this architecture
+
+**Why A2A.** The guard loop started as a function inside `answer_guard.py`, which was easy to test but impossible to scale or interoperate with. Moving it to the Agent-to-Agent protocol gives three things: (1) a standard wire format — AgentCard discovery plus JSON-RPC `message/send` — that any A2A client can drive; (2) process isolation, so a slow or crashing Judge cannot take down the generator; and (3) a clean seam to swap in a different Drafter or Judge later without touching the API. The wire format is implemented directly against the A2A specification, so it runs on the project's existing dependencies; the official `a2a-sdk` is declared in `pyproject.toml` for teams that prefer the SDK client.
+
+**Why separate the Drafter from the Judge.** Generation and evaluation are different jobs with different failure modes. Keeping them as separate agents means the Judge scores with a *different model family* (`gpt-4o-mini`) than the Drafter writes with (DeepSeek), so an answer is never graded by the model that wrote it. It also means the Judge's reason string is a first-class input to the next draft — refinement is targeted at the actual failure, not a blind retry.
+
+**Why a SQLite checkpointer.** In-memory state was lost on a pod restart, a provider fallback, or a long-running workflow. The checkpointer persists the full state (transcript, retries, last draft, question, tenant) as a JSON document keyed by `thread_id`, saved before every LLM call and after every agent response. On a provider failure the supervisor reloads the last state and retries from there, and a client that sends a `thread_id` resumes the exact same thread instead of starting over. Measured write/read latency is ~0.04–0.07 s, so durability costs almost nothing.
+
+**How cross-provider fallback works.** Every generation goes through one choke point, `src/rag/llm.complete`, which declares a LiteLLM fallback chain (DeepSeek → OpenAI). When a DeepSeek call fails (rate limit, timeout, 5xx), LiteLLM retries the same request on the standby model with its own key. At the A2A layer, if the Drafter or Judge agent itself is unreachable, the supervisor catches the failure, records the recovery time (~2.3 s), and falls back to in-process execution of the same skill functions, so an outage never loses the transcript.
+
+**How cost is controlled.** Three guards live in `complete`: a per-call output ceiling (`TESSERA_MAX_OUTPUT_TOKENS`, default 1024), a hard per-call timeout (`TESSERA_REQUEST_TIMEOUT_SECONDS`, default 30), and a process-wide daily spend cap (`TESSERA_DAILY_SPEND_USD_CAP`, default $5). Once the estimated spend crosses the cap, further LLM calls are refused with a clear error instead of silently continuing to bill.
 
 ### Tenant isolation
 
@@ -420,11 +491,16 @@ Kept here rather than buried, because a senior review will find them anyway:
 - Cost tracking is in-process, so the daily budget cap is per-process, not shared across workers. A real deployment would move this to a shared store.
 - The user store is SQLite. It is fine for a single-node demo and would move to Postgres for anything multi-process.
 - Tenant isolation is proven at the retrieval and index layer, not across every subsystem.
+- **The A2A Judge is the latency bottleneck.** DeepEval runs 5–7 gpt-4o-mini metrics sequentially per attempt, so a judged request takes minutes rather than seconds (~218 s avg Judge call in the live run). This is a quality-first trade-off, not a speed claim.
+- **The checkpointer is SQLite** (`data/checkpoints.sqlite3`). It is fine for a single-node deployment; horizontal scaling needs Redis or Postgres so every replica sees the same thread state.
+- **A2A adds latency and moving parts.** Spinning up two agent services plus a supervisor is more than the in-process guard loop; the pay-off is resumability and interoperability, not lower latency.
 
 ## Roadmap
 
 - Docker and Kubernetes deployment to a managed cluster
 - Shared cost tracking (Postgres or Redis) so the budget cap holds across workers
+- Move the checkpointer to Redis for horizontal scaling
+- Parallelize the DeepEval judge metrics (or gate on faithfulness + relevancy only in the hot path) to cut judge latency
 - Langfuse tracing for production observability
 - Wider golden set and a router-accuracy metric so misroutes like `g11` are caught directly
 
