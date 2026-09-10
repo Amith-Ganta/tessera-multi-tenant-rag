@@ -354,8 +354,8 @@ The repository follows a conventional application layout: all importable code li
 ### Install
 
 ```bash
-git clone https://github.com/Amith-Ganta/routed-agentic-compliance-rag.git
-cd routed-agentic-compliance-rag
+git clone https://github.com/Amith-Ganta/tessera-multi-tenant-rag.git
+cd tessera-multi-tenant-rag
 
 uv sync
 
