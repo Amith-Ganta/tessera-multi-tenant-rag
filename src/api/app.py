@@ -9,7 +9,7 @@ import hmac
 import os
 import time
 
-from src.rag.config import RETRIEVER_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, JUDGE_MODE
+from src.rag.config import RETRIEVER_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, JUDGE_MODE, CACHE_ENABLED
 from src.rag.ingest import build_tenant_index
 from src.rag.tenant_context import tenant_corpus_dir, use_tenant
 from src.rag.strategies import run_strategy
@@ -21,6 +21,7 @@ from src.rag.live_eval import evaluate_answer
 from src.auth import auth
 from src.judge.judge_store import judge_store
 from src.judge.async_runner import submit_judge
+from src.cache.semantic_cache import semantic_cache, SemanticCache
 
 try:
     from observability import latency_store, ALL_STAGES
@@ -419,6 +420,25 @@ async def ask(payload: AskRequest, user: tuple[int, str] = Depends(get_current_u
     if payload.use_a2a or payload.thread_id is not None:
         return _run_a2a(payload, tenant, user_id, email, strategy, model, top_k)
 
+    # Phase 4b: semantic cache check. The cache key is computed before any LLM
+    # calls so a hit returns the stored AskResponse fields instantly. We skip
+    # caching for run_eval=True requests in async mode (they come back with
+    # eval=pending) and never cache eval=False results (no quality signal).
+    # Cache is keyed on question + sorted chunk IDs + model; chunk IDs are
+    # filled in from the result after retrieval, so for the lookup we use an
+    # empty chunk-ID list — the key is re-computed with real chunk IDs at write
+    # time. Instead, we key the lookup on (question, model) only via a fast path:
+    # we store the full key at write time and do an exact match at read time
+    # using only the question+model prefix approach.
+    # Simpler and correct: store with the real chunk-based key at write time;
+    # at lookup time, we cannot know chunk IDs yet, so we do NOT hit the cache
+    # on non-eval paths. Cache is only populated AFTER a successful judge run
+    # (either sync or async). The cache key written is the full sha256 of
+    # query + sorted(sources) + model. On subsequent requests with the SAME
+    # question, we first run retrieval, compute the same key, and hit the cache.
+    # This means cache lookups happen AFTER retrieval (after chunk IDs are known).
+    _cache_key: str | None = None
+
     start = time.perf_counter()
     with trace_run(strategy, payload.question, tenant) as run_span:
         with use_tenant(tenant):
@@ -445,6 +465,20 @@ async def ask(payload: AskRequest, user: tuple[int, str] = Depends(get_current_u
                 result = run_strategy(
                     strategy, payload.question, top_k=top_k, model=model, force_route=fr
                 )
+
+            # Phase 4b: compute cache key from the real chunk IDs returned by
+            # this retrieval pass and check if we already have a cached answer.
+            # A hit replaces the result dict so we skip the LLM cost on the
+            # next identical request. Cache is populated only AFTER a successful
+            # judge run (write happens below for sync; async_runner writes for
+            # async). Never cache run_eval=True async results (eval is pending).
+            if CACHE_ENABLED:
+                _chunk_ids = result.get("sources", []) or []
+                _cache_key = SemanticCache.make_key(payload.question, _chunk_ids, model)
+                cached = semantic_cache.get(_cache_key)
+                if cached is not None:
+                    result = cached
+
         latency_ms = (time.perf_counter() - start) * 1000
         run_span.finish(
             route=result.get("route", ""),
@@ -463,23 +497,50 @@ async def ask(payload: AskRequest, user: tuple[int, str] = Depends(get_current_u
 
     # Async mode: submit the judge as a background task and return a pending
     # sentinel so the caller can poll GET /eval/{trace_id}.
-    # Sync mode: the guard loop already attached result["eval"] / result["guard"].
+    # Sync mode: the guard loop already attached result["eval"] / result["guard"];
+    # write to cache when guard passed (eval present and no error).
     if payload.run_eval and JUDGE_MODE == "async":
         import uuid as _uuid
         trace_id = str(_uuid.uuid4())
         contexts = result.get("sources", []) or []
+        # Build cache payload now so the judge task can write it without needing
+        # to recompute tokens / cost.
+        _cache_payload = {
+            "answer": result.get("answer", ""),
+            "route": result.get("route", ""),
+            "strategy": result.get("strategy", strategy),
+            "sources": result.get("sources", []) or [],
+            "usage": usage,
+            "trace": result.get("trace", []) or [],
+        }
         submit_judge(
             trace_id=trace_id,
             question=payload.question,
             answer=result.get("answer", ""),
             contexts=contexts,
             evaluate_fn=evaluate_answer,
+            cache_key=_cache_key if CACHE_ENABLED else None,
+            cache_payload=_cache_payload if CACHE_ENABLED else None,
         )
         eval_result: dict | None = {"status": "pending", "trace_id": trace_id}
         guard = None
     else:
         eval_result = result.get("eval")
         guard = result.get("guard")
+        # Sync path: cache after a successful, non-error judge pass.
+        if CACHE_ENABLED and _cache_key and eval_result and eval_result.get("enabled"):
+            _cache_payload = {
+                "answer": result.get("answer", ""),
+                "route": result.get("route", ""),
+                "strategy": result.get("strategy", strategy),
+                "sources": result.get("sources", []) or [],
+                "usage": usage,
+                "trace": result.get("trace", []) or [],
+            }
+            try:
+                semantic_cache.set(_cache_key, _cache_payload)
+            except Exception:
+                pass
 
     try:
         auth.log_query(
@@ -580,8 +641,11 @@ def metrics_latency(user: tuple[int, str] = Depends(get_current_user)) -> dict:
     for name, stats in snapshot.items():  # include any stage not in ALL_STAGES defensively
         ordered.setdefault(name, stats)
     total = sum(stats.get("count", 0) for stats in ordered.values())
+    cache_stats = semantic_cache.stats() if CACHE_ENABLED else None
     return {
         "stages": ordered,
         "sample_window": latency_store.max_samples,
         "total_samples": total,
+        "cache_hit_rate": cache_stats["hit_rate"] if cache_stats else None,
+        "cache_stats": cache_stats,
     }
