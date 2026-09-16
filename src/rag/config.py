@@ -77,3 +77,21 @@ RERANK_SKIP_THRESHOLD = 0.90
 # "context worth refining against" (again on Chroma's [0, 1] relevance score);
 # below it we return an honest insufficient-context answer instead of refining.
 MIN_CONTEXT_CONFIDENCE_FOR_REFINE = 0.50
+
+# Phase 4a -- async judging.
+# "async" runs the judge in a background asyncio task and returns immediately with
+# eval={"status": "pending", "trace_id": ...}; callers poll GET /eval/{trace_id}.
+# "sync" is the Phase 3 behaviour: judge blocks the /ask response (used by CI).
+JUDGE_MODE = "async"  # "sync" restores Phase 3 blocking behaviour for CI
+
+# Maximum number of trace_id → result entries to keep in the in-process judge store.
+# Once the limit is reached, the oldest entry is evicted (ring-buffer semantics).
+JUDGE_STORE_MAX = 5000
+
+# Phase 4b -- semantic caching.
+# When enabled, a cache key (sha256 of query + sorted chunk IDs + model name) is
+# checked before the LLM call. A hit returns the stored answer instantly.
+# In async mode the cache is written only after the judge task completes and passes.
+# In sync mode the cache is written only if both guard and judge passed.
+CACHE_ENABLED = True
+CACHE_TTL_SECONDS = 21600  # 6 hours

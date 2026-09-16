@@ -9,7 +9,7 @@ import hmac
 import os
 import time
 
-from src.rag.config import RETRIEVER_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP
+from src.rag.config import RETRIEVER_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, JUDGE_MODE
 from src.rag.ingest import build_tenant_index
 from src.rag.tenant_context import tenant_corpus_dir, use_tenant
 from src.rag.strategies import run_strategy
@@ -19,6 +19,14 @@ from src.rag.models import ALLOWED_MODELS, DEFAULT_MODEL
 from src.rag.analytics import log_analytics, read_analytics
 from src.rag.live_eval import evaluate_answer
 from src.auth import auth
+from src.judge.judge_store import judge_store
+from src.judge.async_runner import submit_judge
+
+try:
+    from observability import latency_store, ALL_STAGES
+except Exception:  # pragma: no cover - defensive: metrics are optional, never fatal
+    latency_store = None
+    ALL_STAGES = ()
 
 ALLOWED_STRATEGIES = ["adaptive", "corrective", "cache", "autonomous", "multi_agent"]
 DEFAULT_STRATEGY = "adaptive"
@@ -362,7 +370,7 @@ def _run_a2a(
 
 
 @app.post("/ask", response_model=AskResponse)
-def ask(payload: AskRequest, user: tuple[int, str] = Depends(get_current_user)) -> AskResponse:
+async def ask(payload: AskRequest, user: tuple[int, str] = Depends(get_current_user)) -> AskResponse:
     user_id, email = user
     tenant = auth.tenant_slug(user_id)
 
@@ -414,13 +422,15 @@ def ask(payload: AskRequest, user: tuple[int, str] = Depends(get_current_user)) 
     start = time.perf_counter()
     with trace_run(strategy, payload.question, tenant) as run_span:
         with use_tenant(tenant):
-            # When eval is requested we run the ENFORCED guard loop: generate,
-            # judge with the cross-family gpt-4o-mini judge, and regenerate with
-            # the judge's reason as feedback until the faithfulness and relevancy
-            # gate passes or MAX_RETRIES is hit. It attaches result["eval"] and
-            # result["guard"]. When eval is off we keep the single un-guarded call
-            # so the common path pays no extra judge cost or latency.
-            if payload.run_eval:
+            # Async judge mode: fire-and-forget — generate the answer without
+            # blocking on evaluation; the judge runs in a background task and its
+            # result is available via GET /eval/{trace_id}. Sync mode preserves
+            # Phase 3 behaviour (blocks the request until all metrics complete).
+            if payload.run_eval and JUDGE_MODE == "async":
+                result = run_strategy(
+                    strategy, payload.question, top_k=top_k, model=model, force_route=fr
+                )
+            elif payload.run_eval:
                 result = guarded_answer(
                     strategy,
                     payload.question,
@@ -451,11 +461,25 @@ def ask(payload: AskRequest, user: tuple[int, str] = Depends(get_current_user)) 
     token_sum = tokens["prompt"] + tokens["completion"]
     estimated_cost_usd = (token_sum / 1_000_000) * DEEPSEEK_CHAT_USD_PER_1M_TOKENS_ESTIMATED
 
-    # The guard loop already ran the judge and attached result["eval"] (and
-    # result["guard"]) on its final attempt, so we reuse that here instead of
-    # paying a second judge call. When run_eval is off, both are absent.
-    eval_result = result.get("eval")
-    guard = result.get("guard")
+    # Async mode: submit the judge as a background task and return a pending
+    # sentinel so the caller can poll GET /eval/{trace_id}.
+    # Sync mode: the guard loop already attached result["eval"] / result["guard"].
+    if payload.run_eval and JUDGE_MODE == "async":
+        import uuid as _uuid
+        trace_id = str(_uuid.uuid4())
+        contexts = result.get("sources", []) or []
+        submit_judge(
+            trace_id=trace_id,
+            question=payload.question,
+            answer=result.get("answer", ""),
+            contexts=contexts,
+            evaluate_fn=evaluate_answer,
+        )
+        eval_result: dict | None = {"status": "pending", "trace_id": trace_id}
+        guard = None
+    else:
+        eval_result = result.get("eval")
+        guard = result.get("guard")
 
     try:
         auth.log_query(
@@ -507,8 +531,57 @@ def ask(payload: AskRequest, user: tuple[int, str] = Depends(get_current_user)) 
     )
 
 
+@app.get("/eval/{trace_id}")
+def eval_result_endpoint(
+    trace_id: str, user: tuple[int, str] = Depends(get_current_user)
+) -> dict:
+    """Poll the result of an async judge run.
+
+    Returns 202 while the judge is still running, 200 when done, 404 if the
+    trace_id is unknown.  The judge_store is a process-wide ring buffer — trace
+    IDs from a different worker or a restarted process will return 404.
+    """
+    entry = judge_store.get(trace_id)
+    if entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="trace_id not found")
+    if entry.get("status") == "pending":
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=202, content={"status": "pending", "trace_id": trace_id})
+    return entry
+
+
 @app.get("/admin/analytics")
 def admin_analytics(limit: int = 100, user: tuple[int, str] = Depends(get_current_user)) -> dict:
     if not auth.is_admin(user[1]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
     return {"records": read_analytics(limit)}
+
+
+@app.get("/metrics/latency")
+def metrics_latency(user: tuple[int, str] = Depends(get_current_user)) -> dict:
+    """Per-stage latency percentiles from the in-process ring buffer.
+
+    Returns P50/P95/P99 (plus count/min/max/mean) for each of the eight RAG
+    stages, in pipeline order. Read-only: it never touches the /ask response
+    shape and does not record anything. This reflects only the current process
+    (per-worker ring buffer), which is exact for a single-process deployment;
+    cross-replica aggregation is a later phase. Auth-gated but not admin-only --
+    these are operational timings, not tenant data.
+    """
+    if latency_store is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="latency instrumentation unavailable",
+        )
+    snapshot = latency_store.snapshot()
+    # Emit stages in pipeline order rather than dict/hash order so the payload
+    # reads top-to-bottom the way a request flows.
+    ordered = {str(stage): snapshot[str(stage)] for stage in ALL_STAGES if str(stage) in snapshot}
+    for name, stats in snapshot.items():  # include any stage not in ALL_STAGES defensively
+        ordered.setdefault(name, stats)
+    total = sum(stats.get("count", 0) for stats in ordered.values())
+    return {
+        "stages": ordered,
+        "sample_window": latency_store.max_samples,
+        "total_samples": total,
+    }
