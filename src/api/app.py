@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
+from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from pathlib import Path
 import hashlib
 import hmac
+import json
 import os
 import time
 
@@ -371,7 +373,11 @@ def _run_a2a(
 
 
 @app.post("/ask", response_model=AskResponse)
-async def ask(payload: AskRequest, user: tuple[int, str] = Depends(get_current_user)) -> AskResponse:
+async def ask(
+    payload: AskRequest,
+    request: Request,
+    user: tuple[int, str] = Depends(get_current_user),
+) -> AskResponse | StreamingResponse:
     user_id, email = user
     tenant = auth.tenant_slug(user_id)
 
@@ -576,7 +582,7 @@ async def ask(payload: AskRequest, user: tuple[int, str] = Depends(get_current_u
     except Exception:
         pass
 
-    return AskResponse(
+    ask_response = AskResponse(
         answer=result.get("answer", ""),
         route=result.get("route", ""),
         strategy=result.get("strategy", strategy),
@@ -590,6 +596,26 @@ async def ask(payload: AskRequest, user: tuple[int, str] = Depends(get_current_u
         guard=guard,
         trace=result.get("trace", []) or [],
     )
+
+    # Phase 4c: if the client accepts SSE, stream token events then a final
+    # event containing the full 14-field meta. The strategy has already run
+    # synchronously above; we split the completed answer into whitespace-separated
+    # tokens and yield them one by one so clients can display progressive output
+    # without changing the server-side generation logic.
+    accept = request.headers.get("accept", "")
+    if "text/event-stream" in accept:
+        async def _sse_generator():
+            answer_text = ask_response.answer
+            words = answer_text.split(" ")
+            for i, word in enumerate(words):
+                token = word if i == 0 else " " + word
+                yield f"data: {json.dumps({'token': token})}\n\n"
+            meta = ask_response.model_dump()
+            yield f"data: {json.dumps({'done': True, 'meta': meta})}\n\n"
+
+        return StreamingResponse(_sse_generator(), media_type="text/event-stream")
+
+    return ask_response
 
 
 @app.get("/eval/{trace_id}")
