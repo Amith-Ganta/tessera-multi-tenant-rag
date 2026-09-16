@@ -58,3 +58,22 @@ CHUNK_OVERLAP = 120
 EMBEDDING_MODEL = "text-embedding-3-small"
 CHAT_MODEL = "deepseek/deepseek-chat"
 RETRIEVER_TOP_K = 5
+
+# Phase 2 Part A -- conditional re-ranking.
+# When the top-1 retrieved chunk is already a very strong match, the cross-encoder
+# re-ranker rarely changes the order but still costs a full model pass over every
+# candidate. 0.90 (on Chroma's normalised [0, 1] relevance score) marks "retrieval
+# is already confident": above it we trust the fused order and skip the re-ranker;
+# at or below it we still pay for re-ranking, because that is exactly the regime
+# where re-ordering earns its keep. The gate is strictly-above only, so 0.90 itself
+# still runs the re-ranker (a conservative default -- err towards re-ranking).
+RERANK_SKIP_THRESHOLD = 0.90
+
+# Phase 2 Part B -- conditional refinement.
+# The generate-judge-refine loop only helps when there is solid context to refine
+# against. If the best retrieved chunk is weak, refining a low-faithfulness answer
+# just polishes a guess: the judge's feedback pushes the model to sound more
+# confident about context that never supported the claim. 0.50 is the floor of
+# "context worth refining against" (again on Chroma's [0, 1] relevance score);
+# below it we return an honest insufficient-context answer instead of refining.
+MIN_CONTEXT_CONFIDENCE_FOR_REFINE = 0.50

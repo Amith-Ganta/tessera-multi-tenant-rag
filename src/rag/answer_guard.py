@@ -14,9 +14,23 @@ strategies nor live_eval at load time and stays unit-testable.
 """
 from __future__ import annotations
 
+from .config import MIN_CONTEXT_CONFIDENCE_FOR_REFINE
+
 MAX_RETRIES = 2
 FAITHFULNESS_KEY = "faithfulness"
 RELEVANCY_KEY = "answer_relevancy"
+
+# Phase 2 Part B -- conditional refinement.
+# Message returned instead of a refined answer when the judge is unhappy AND the
+# retrieved context was too weak to refine against. Refining against weak context
+# produces confident-sounding hallucinations. The honest answer is better than a
+# refined guess.
+INSUFFICIENT_CONTEXT_MESSAGE = (
+    "I don't have enough relevant information in the knowledge base to answer this "
+    "confidently. The retrieved context does not appear to cover the question, so "
+    "rather than guess I'm flagging it as insufficient. Please rephrase, add "
+    "supporting documents, or confirm the topic is in scope."
+)
 
 
 def _gate_metrics(eval_result: dict) -> dict:
@@ -116,6 +130,7 @@ def guarded_answer(
     guard_passed = None
     attempts_used = 0
     note = ""
+    insufficient_context = False
 
     try:
         for attempt in range(1, MAX_RETRIES + 2):
@@ -176,6 +191,34 @@ def guarded_answer(
                 result["trace"].append(f"guard: {note}")
                 break
 
+            # Phase 2 Part B -- conditional refinement gate.
+            # The loop only refines when BOTH hold: the judge marked faithfulness a
+            # failure AND retrieval was confident enough that better grounding is
+            # actually reachable. When faithfulness failed but the top-1 retrieved
+            # similarity is below MIN_CONTEXT_CONFIDENCE_FOR_REFINE, we stop and
+            # return an honest insufficient-context answer instead of refining.
+            # Refining against weak context produces confident-sounding
+            # hallucinations. The honest answer is better than a refined guess.
+            faithfulness_failed = gated[FAITHFULNESS_KEY]["passed"] is False
+            top1 = result.get("top1_similarity")
+            context_confident = (
+                isinstance(top1, (int, float))
+                and top1 >= MIN_CONTEXT_CONFIDENCE_FOR_REFINE
+            )
+            if faithfulness_failed and not context_confident:
+                guard_enabled = True
+                guard_passed = False
+                insufficient_context = True
+                note = (
+                    "insufficient context: faithfulness failed and top-1 similarity "
+                    f"{top1} < MIN_CONTEXT_CONFIDENCE_FOR_REFINE "
+                    f"({MIN_CONTEXT_CONFIDENCE_FOR_REFINE}); not refining, "
+                    "returning honest insufficient-context answer"
+                )
+                result["answer"] = INSUFFICIENT_CONTEXT_MESSAGE
+                result["trace"].append(f"guard: {note}")
+                break
+
             if attempt <= MAX_RETRIES:
                 reasons = []
                 for key, val in gated.items():
@@ -228,6 +271,11 @@ def guarded_answer(
                 FAITHFULNESS_KEY: final_scores[FAITHFULNESS_KEY],
                 RELEVANCY_KEY: final_scores[RELEVANCY_KEY],
             },
+            # Phase 2 Part B: True when the loop returned the honest
+            # insufficient-context answer instead of refining. Lets callers
+            # distinguish this response from a normal answer via the existing
+            # guard field, without adding a new /ask response field.
+            "insufficient_context": insufficient_context,
             "note": note,
         }
         return result
@@ -250,6 +298,7 @@ def guarded_answer(
             "attempts": attempts_used,
             "max_retries": MAX_RETRIES,
             "final_scores": {FAITHFULNESS_KEY: None, RELEVANCY_KEY: None},
+            "insufficient_context": False,
             "note": error_note,
         }
         return fallback

@@ -10,13 +10,108 @@ import time
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 
-from .config import EMBEDDING_MODEL, RETRIEVER_TOP_K, get_openai_api_key
+from .config import (
+    EMBEDDING_MODEL,
+    RERANK_SKIP_THRESHOLD,
+    RETRIEVER_TOP_K,
+    get_openai_api_key,
+)
 from .llm import complete
 from .models import DEFAULT_MODEL
+from .retriever_dense import get_vectorstore
 from .retriever_hybrid import retrieve_hybrid
 from .reranker import rerank
 from .router import route_query, tavily_search
 from .tenant_context import active_index_dir
+
+# Phase 1 latency instrumentation. Import guarded: if the top-level observability
+# package is unavailable for any reason, time_stage degrades to a no-op context
+# manager so the pipeline behaves exactly as before. Instrumentation must never
+# be able to break a request.
+try:
+    from observability import Stage, time_stage
+except Exception:  # pragma: no cover - defensive import
+    import contextlib as _contextlib
+
+    class Stage:  # minimal shim; attribute access returns the stage name string
+        QUERY_PROCESSING = "query_processing"
+        EMBEDDING = "embedding"
+        VECTOR_RETRIEVAL = "vector_retrieval"
+        METADATA_FILTERING = "metadata_filtering"
+        RERANKING = "reranking"
+        PROMPT_STITCHING = "prompt_stitching"
+        LLM_GENERATION = "llm_generation"
+        POST_PROCESSING = "post_processing"
+
+    @_contextlib.contextmanager
+    def time_stage(*_args, **_kwargs):
+        yield
+
+
+# Sentinel for "top-1 similarity could not be measured". Callers treat an unknown
+# similarity as low confidence: it must never cause the re-ranker to be skipped and
+# must never let refinement proceed on unverifiable context.
+SIMILARITY_UNKNOWN = -1.0
+
+
+def _top1_similarity(question: str) -> float:
+    """Best dense relevance score in [0, 1] for the question, or SIMILARITY_UNKNOWN.
+
+    Phase 2 gates (conditional re-ranking, conditional refinement) need a single
+    honest "how confident was retrieval" number. The hybrid retriever fuses ranks
+    and discards scores, so we read the top-1 relevance score straight from Chroma
+    for the active tenant index. This is a cheap vector lookup against the same
+    store the dense arm already queried. Any failure returns SIMILARITY_UNKNOWN so
+    a scoring problem can never crash a request or silently skip the re-ranker.
+    """
+    try:
+        vectorstore = get_vectorstore()
+        scored = vectorstore.similarity_search_with_relevance_scores(question, k=1)
+    except Exception:  # pragma: no cover - defensive: scoring must never break /ask
+        return SIMILARITY_UNKNOWN
+    if not scored:
+        return SIMILARITY_UNKNOWN
+    _doc, score = scored[0]
+    try:
+        return float(score)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return SIMILARITY_UNKNOWN
+
+
+def _maybe_rerank(
+    question: str,
+    docs: list[Document],
+    top_k: int,
+    top1: float,
+    trace: list[str] | None = None,
+) -> list[Document]:
+    """Run the cross-encoder re-ranker only when retrieval confidence is not high.
+
+    Part A of Phase 2. Decision rules:
+      * empty retrieval -> skip safely, no re-ranker call, no crash;
+      * top-1 similarity strictly above RERANK_SKIP_THRESHOLD -> skip (retrieval is
+        already confident, pass the fused order through unchanged);
+      * otherwise (including exactly at the threshold, or unknown similarity) -> run
+        the re-ranker exactly as before.
+    Every decision is logged in the structured form the task specifies.
+    """
+    if not docs:
+        if trace is not None:
+            trace.append("stage=reranking, action=skipped, reason=no_results")
+        return docs
+
+    if top1 > RERANK_SKIP_THRESHOLD:
+        if trace is not None:
+            trace.append(
+                f"stage=reranking, action=skipped, reason=high_confidence, top1={top1}"
+            )
+        return docs
+
+    reranked = rerank(question, docs, top_k)
+    if trace is not None:
+        trace.append(f"stage=reranking, action=ran, top1={top1}")
+    return reranked
+
 
 # Each entry is (vector, question, result, (monotonic_stamp, absolute_stamp)).
 _CACHE: dict[str, list[tuple[list[float], str, dict, tuple[float, float]]]] = {}
@@ -222,56 +317,92 @@ def _adaptive_impl(
     trace: list[str] = []
     usage = _zero_usage()
 
-    if force_route in {"vector", "web", "direct"}:
-        route = force_route
-        reason = f"forced by caller: {force_route}"
-    else:
-        routed = route_query(question)
-        route = routed.route
-        reason = getattr(routed, "reason", "")
+    # Stage: query_processing -- decide the route (LLM router or forced) plus the
+    # cheap input handling that precedes retrieval.
+    with time_stage(Stage.QUERY_PROCESSING):
+        if force_route in {"vector", "web", "direct"}:
+            route = force_route
+            reason = f"forced by caller: {force_route}"
+        else:
+            routed = route_query(question)
+            route = routed.route
+            reason = getattr(routed, "reason", "")
     trace.append(f"routing route={route} reason={reason}")
 
+    # Stage: vector_retrieval -- the retrieval call. The query-embedding step runs
+    # inside retrieve_hybrid's dense arm, so the embedding stage is timed at its
+    # own isolable call site (the cache strategy's explicit embed_query) rather
+    # than double-counted here; for the adaptive path embedding time is subsumed
+    # by vector_retrieval, which is where it physically executes.
     docs: list[Document] = []
+    # top-1 retrieval confidence in [0, 1] (SIMILARITY_UNKNOWN if unmeasurable).
+    # Measured only on the local vector path -- web/direct routes have no dense
+    # index score, so they keep the conservative "unknown" value.
+    top1_similarity = SIMILARITY_UNKNOWN
     if route == "web":
         docs, note = tavily_search(question, top_k)
         trace.append(f"web search returned {len(docs)} docs")
         if note:
             trace.append(f"web search note: {note}")
         if not docs:
-            docs = retrieve_hybrid(question, top_k)
+            with time_stage(Stage.VECTOR_RETRIEVAL):
+                docs = retrieve_hybrid(question, top_k)
+                top1_similarity = _top1_similarity(question)
             route = "vector"
             trace.append("web search empty fallback to vector retrieval")
     elif route == "direct":
         docs = []
     else:
         route = "vector"
-        docs = retrieve_hybrid(question, top_k)
+        with time_stage(Stage.VECTOR_RETRIEVAL):
+            docs = retrieve_hybrid(question, top_k)
+            top1_similarity = _top1_similarity(question)
 
-    if docs:
-        docs = rerank(question, docs, top_k)
-        trace.append("reranked retrieved docs")
+    # Stage: reranking -- cross-encoder reorder, run conditionally (Phase 2 Part A).
+    with time_stage(Stage.RERANKING):
+        docs = _maybe_rerank(question, docs, top_k, top1_similarity, trace)
 
-    injection_flags = _injection_flags(docs)
+    # Stage: metadata_filtering -- post-retrieval filtering over the docs
+    # (injection-signal scan and multi-source conflict detection). Tenant scoping
+    # itself is applied upstream in the retriever via the active index directory;
+    # this is the per-document filtering that runs on the retrieved set.
+    with time_stage(Stage.METADATA_FILTERING):
+        injection_flags = _injection_flags(docs)
+        conflict_notes = _detect_potential_conflicts(docs)
     if injection_flags:
         trace.append(f"injection guard flags={injection_flags}")
-    for note in _detect_potential_conflicts(docs):
+    for note in conflict_notes:
         trace.append(f"conflict signal {note}")
 
-    context_text = _context_text(docs)
+    # Stage: prompt_stitching -- build the grounded context block and the final
+    # chat messages.
+    with time_stage(Stage.PROMPT_STITCHING):
+        context_text = _context_text(docs)
+        messages = _answer_prompt(question, context_text, feedback)
     if feedback:
         trace.append("regeneration with guard feedback")
-    answer, usage_delta = _llm(model, _answer_prompt(question, context_text, feedback))
+
+    # Stage: llm_generation -- the answer generation call.
+    with time_stage(Stage.LLM_GENERATION):
+        answer, usage_delta = _llm(model, messages)
     _add_usage(usage, usage_delta)
 
-    return {
-        "answer": answer,
-        "route": route,
-        "contexts": [doc.page_content for doc in docs],
-        "sources": _sources(docs),
-        "usage": usage,
-        "strategy": "adaptive",
-        "trace": trace,
-    }
+    # Stage: post_processing -- assemble the response payload the handler returns.
+    with time_stage(Stage.POST_PROCESSING):
+        result = {
+            "answer": answer,
+            "route": route,
+            "contexts": [doc.page_content for doc in docs],
+            "sources": _sources(docs),
+            "usage": usage,
+            "strategy": "adaptive",
+            "trace": trace,
+            # Internal signal for the runtime guard's conditional refinement
+            # (Phase 2 Part B). Consumed by answer_guard.guarded_answer; never
+            # surfaced as an /ask response field.
+            "top1_similarity": top1_similarity,
+        }
+    return result
 
 
 def _strategy_adaptive(
@@ -294,8 +425,7 @@ def _strategy_corrective(
     usage = _zero_usage()
 
     docs = retrieve_hybrid(question, top_k)
-    if docs:
-        docs = rerank(question, docs, top_k)
+    docs = _maybe_rerank(question, docs, top_k, _top1_similarity(question), trace)
     trace.append(f"retrieved {len(docs)} vector docs")
 
     context_text = _context_text(docs)
@@ -354,7 +484,13 @@ def _strategy_cache(
     force_route: str | None = None,
 ) -> dict:
     embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL, api_key=get_openai_api_key())
-    query_embedding = embeddings.embed_query(question)
+    # Stage: embedding -- this is the one call site where the query embedding runs
+    # in isolation (the semantic-cache lookup embeds the question directly). In the
+    # adaptive/vector path embedding is folded inside retrieve_hybrid's dense arm,
+    # so it is honestly counted there under vector_retrieval; here it is its own
+    # measurable boundary.
+    with time_stage(Stage.EMBEDDING):
+        query_embedding = embeddings.embed_query(question)
 
     key = str(active_index_dir())
     entries = _CACHE.setdefault(key, [])
@@ -448,8 +584,9 @@ def _strategy_autonomous(
 
         if tool == "retrieve_context":
             retrieved = retrieve_hybrid(query, top_k)
-            if retrieved:
-                retrieved = rerank(query, retrieved, top_k)
+            retrieved = _maybe_rerank(
+                query, retrieved, top_k, _top1_similarity(query), trace
+            )
             docs.extend(retrieved)
             observation = _context_text(retrieved)
             if not observation:
@@ -529,8 +666,9 @@ def _strategy_multi_agent(
     seen: set[str] = set()
     for subquery in subqueries:
         retrieved = retrieve_hybrid(subquery, top_k)
-        if retrieved:
-            retrieved = rerank(subquery, retrieved, top_k)
+        retrieved = _maybe_rerank(
+            subquery, retrieved, top_k, _top1_similarity(subquery), trace
+        )
         for doc in retrieved:
             if doc.page_content not in seen:
                 seen.add(doc.page_content)

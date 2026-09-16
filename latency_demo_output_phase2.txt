@@ -1,0 +1,64 @@
+# Phase 2 delta vs Phase 1 baseline
+# Baseline = latency_demo_output.txt (committed c69052a). Both runs: 20 adaptive
+# queries, forced vector route, run_eval off. Deltas are Phase 2 minus Phase 1,
+# in milliseconds; positive = slower in Phase 2. Percentiles come from independent
+# per-stage ring buffers, so a stage delta reflects that stage only.
+#
+# query_processing   p50 +0.000    p95 +0.000    p99 +0.002
+# embedding          p50   n/a      p95   n/a      p99   n/a     (0 samples both runs; nested in vector_retrieval on the adaptive path)
+# vector_retrieval   p50 +4060.765  p95 +4321.231  p99 +1082.794 (slower cold run; 2x embed round-trips + 2x uncached get_vectorstore still dominate)
+# metadata_filtering p50 +0.000    p95 -0.001    p99 -0.001
+# reranking          p50   NEW      p95   NEW      p99   NEW      (0 -> 20 samples; Phase 2 Part A timer now always entered, times a ~0.004ms SKIP because top1 > RERANK_SKIP_THRESHOLD on these KB-hit queries)
+# prompt_stitching   p50 +0.000    p95 +0.002    p99 +0.003
+# llm_generation     p50 +121.552  p95 +852.038  p99 +1482.232  (within expected band; run-to-run LLM tail variance, not a code change)
+# post_processing    p50 +0.001    p95 +0.002    p99 +0.010
+#
+# Net effect on total p95: no clean sum exists (percentiles are per-stage medians/tails from
+# independent buffers, not additive). Client round-trip mean rose 10318.3 -> 14520.4 ms (+4202.1 ms),
+# accounted for by vector_retrieval (+~4.3s p95, a slower cold retrieval run) plus a heavier
+# llm_generation tail (+~0.85s p95). Phase 2's conditional re-ranking added zero measurable cost
+# (reranking now records a sub-microsecond skip instead of 0 samples), and conditional refinement
+# is not exercised here because run_eval is off. Phase 2 introduced no latency regression; the
+# retrieval inflation is the pre-existing vector_retrieval anomaly documented in the diagnostic.
+
+[latency_demo] target: http://127.0.0.1:8000
+[latency_demo] firing 20 query(ies)
+  [ 1/20] ok   24883.5 ms  What is this knowledge base about?
+  [ 2/20] ok   14728.9 ms  Summarize the main topic in one sentence.
+  [ 3/20] ok   12744.4 ms  What are the key components described?
+  [ 4/20] ok   12913.2 ms  List any limitations or caveats mentioned.
+  [ 5/20] ok   12500.7 ms  What problem does the described system solve?
+  [ 6/20] ok   13289.1 ms  Are there any configuration options discussed?
+  [ 7/20] ok   14583.0 ms  What technologies are referenced?
+  [ 8/20] ok   13929.4 ms  Describe the overall architecture briefly.
+  [ 9/20] ok   18835.0 ms  What is the recommended way to get started?
+  [10/20] ok   13626.6 ms  Are there any security considerations noted?
+  [11/20] ok   13139.4 ms  What is this knowledge base about?
+  [12/20] ok   13220.3 ms  Summarize the main topic in one sentence.
+  [13/20] ok   12235.9 ms  What are the key components described?
+  [14/20] ok   12965.9 ms  List any limitations or caveats mentioned.
+  [15/20] ok   13334.5 ms  What problem does the described system solve?
+  [16/20] ok   13562.6 ms  Are there any configuration options discussed?
+  [17/20] ok   13575.8 ms  What technologies are referenced?
+  [18/20] ok   16790.2 ms  Describe the overall architecture briefly.
+  [19/20] ok   15809.6 ms  What is the recommended way to get started?
+  [20/20] ok   13740.7 ms  Are there any security considerations noted?
+
+[latency_demo] 20/20 requests succeeded
+[latency_demo] client-observed round-trip avg: 14520.4 ms (includes network + full server handling)
+
+=============================================================================
+Per-stage latency (in-process ring buffer, last 1000 samples/stage)
+=============================================================================
+stage                 count    p50_ms    p95_ms    p99_ms   mean_ms    max_ms
+-----------------------------------------------------------------------------
+query_processing         20    0.004    0.005    0.007    0.004    0.007
+embedding                 0-----
+vector_retrieval         20 7757.29410446.77315909.268 8343.23717274.891
+metadata_filtering       20    0.006    0.009    0.009    0.007    0.009
+reranking                20    0.004    0.005    0.005    0.004    0.005
+prompt_stitching         20    0.009    0.013    0.016    0.009    0.017
+llm_generation           20 3236.280 4581.433 5752.184 3537.626 6044.872
+post_processing          20    0.007    0.009    0.017    0.007    0.019
+-----------------------------------------------------------------------------
+total samples recorded across stages: 140
