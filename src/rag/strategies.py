@@ -18,7 +18,6 @@ from .config import (
 )
 from .llm import complete
 from .models import DEFAULT_MODEL
-from .retriever_dense import get_vectorstore
 from .retriever_hybrid import retrieve_hybrid
 from .reranker import rerank
 from .router import route_query, tavily_search
@@ -54,21 +53,17 @@ except Exception:  # pragma: no cover - defensive import
 SIMILARITY_UNKNOWN = -1.0
 
 
-def _top1_similarity(question: str) -> float:
-    """Best dense relevance score in [0, 1] for the question, or SIMILARITY_UNKNOWN.
+def _top1_similarity(scored: list[tuple[Document, float]]) -> float:
+    """Top-1 dense relevance score in [0, 1] from a scored retrieval, or UNKNOWN.
 
     Phase 2 gates (conditional re-ranking, conditional refinement) need a single
-    honest "how confident was retrieval" number. The hybrid retriever fuses ranks
-    and discards scores, so we read the top-1 relevance score straight from Chroma
-    for the active tenant index. This is a cheap vector lookup against the same
-    store the dense arm already queried. Any failure returns SIMILARITY_UNKNOWN so
-    a scoring problem can never crash a request or silently skip the re-ranker.
+    honest "how confident was retrieval" number. Phase 3 removed the second Chroma
+    call this helper used to make: the dense scores now come straight from the
+    first-pass hybrid retrieval (retrieve_hybrid(..., return_scores=True)), so this
+    is a pure, in-memory read of the top ranked tuple. No network access. Any
+    empty or malformed input returns SIMILARITY_UNKNOWN so a scoring problem can
+    never crash a request or silently skip the re-ranker.
     """
-    try:
-        vectorstore = get_vectorstore()
-        scored = vectorstore.similarity_search_with_relevance_scores(question, k=1)
-    except Exception:  # pragma: no cover - defensive: scoring must never break /ask
-        return SIMILARITY_UNKNOWN
     if not scored:
         return SIMILARITY_UNKNOWN
     _doc, score = scored[0]
@@ -329,11 +324,14 @@ def _adaptive_impl(
             reason = getattr(routed, "reason", "")
     trace.append(f"routing route={route} reason={reason}")
 
-    # Stage: vector_retrieval -- the retrieval call. The query-embedding step runs
-    # inside retrieve_hybrid's dense arm, so the embedding stage is timed at its
-    # own isolable call site (the cache strategy's explicit embed_query) rather
-    # than double-counted here; for the adaptive path embedding time is subsumed
-    # by vector_retrieval, which is where it physically executes.
+    # Stage: vector_retrieval / embedding -- the retrieval call. Phase 3 (3a) moved
+    # the stage timers *into* the dense retriever (retriever_dense): the query
+    # embedding is now timed under EMBEDDING and the Chroma vector lookup under
+    # VECTOR_RETRIEVAL at the exact call sites where they execute, so embedding is
+    # no longer hidden inside vector_retrieval on the adaptive path. We therefore
+    # do not wrap the retrieval call in an outer VECTOR_RETRIEVAL timer here -- that
+    # would double-count. Score extraction below is pure in-memory (no timer): it
+    # reuses the first-pass dense scores instead of issuing a second lookup.
     docs: list[Document] = []
     # top-1 retrieval confidence in [0, 1] (SIMILARITY_UNKNOWN if unmeasurable).
     # Measured only on the local vector path -- web/direct routes have no dense
@@ -345,18 +343,18 @@ def _adaptive_impl(
         if note:
             trace.append(f"web search note: {note}")
         if not docs:
-            with time_stage(Stage.VECTOR_RETRIEVAL):
-                docs = retrieve_hybrid(question, top_k)
-                top1_similarity = _top1_similarity(question)
+            scored = retrieve_hybrid(question, top_k, return_scores=True)
+            docs = [doc for doc, _score in scored]
+            top1_similarity = _top1_similarity(scored)
             route = "vector"
             trace.append("web search empty fallback to vector retrieval")
     elif route == "direct":
         docs = []
     else:
         route = "vector"
-        with time_stage(Stage.VECTOR_RETRIEVAL):
-            docs = retrieve_hybrid(question, top_k)
-            top1_similarity = _top1_similarity(question)
+        scored = retrieve_hybrid(question, top_k, return_scores=True)
+        docs = [doc for doc, _score in scored]
+        top1_similarity = _top1_similarity(scored)
 
     # Stage: reranking -- cross-encoder reorder, run conditionally (Phase 2 Part A).
     with time_stage(Stage.RERANKING):
@@ -424,8 +422,9 @@ def _strategy_corrective(
     trace: list[str] = []
     usage = _zero_usage()
 
-    docs = retrieve_hybrid(question, top_k)
-    docs = _maybe_rerank(question, docs, top_k, _top1_similarity(question), trace)
+    scored = retrieve_hybrid(question, top_k, return_scores=True)
+    docs = [doc for doc, _score in scored]
+    docs = _maybe_rerank(question, docs, top_k, _top1_similarity(scored), trace)
     trace.append(f"retrieved {len(docs)} vector docs")
 
     context_text = _context_text(docs)
@@ -583,9 +582,10 @@ def _strategy_autonomous(
         query = str(parsed.get("query") or question)
 
         if tool == "retrieve_context":
-            retrieved = retrieve_hybrid(query, top_k)
+            scored = retrieve_hybrid(query, top_k, return_scores=True)
+            retrieved = [doc for doc, _score in scored]
             retrieved = _maybe_rerank(
-                query, retrieved, top_k, _top1_similarity(query), trace
+                query, retrieved, top_k, _top1_similarity(scored), trace
             )
             docs.extend(retrieved)
             observation = _context_text(retrieved)
@@ -665,9 +665,10 @@ def _strategy_multi_agent(
     docs: list[Document] = []
     seen: set[str] = set()
     for subquery in subqueries:
-        retrieved = retrieve_hybrid(subquery, top_k)
+        scored = retrieve_hybrid(subquery, top_k, return_scores=True)
+        retrieved = [doc for doc, _score in scored]
         retrieved = _maybe_rerank(
-            subquery, retrieved, top_k, _top1_similarity(subquery), trace
+            subquery, retrieved, top_k, _top1_similarity(scored), trace
         )
         for doc in retrieved:
             if doc.page_content not in seen:

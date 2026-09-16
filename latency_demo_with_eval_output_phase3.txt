@@ -1,0 +1,45 @@
+[latency_demo_with_eval] target: http://127.0.0.1:8000
+[latency_demo_with_eval] firing 20 query(ies) with run_eval=True
+[latency_demo_with_eval] 3 adversarial low-confidence queries are mixed in
+  [ 1/20] ok   36073.8 ms        What is this knowledge base about?
+  [ 2/20] ok   73439.5 ms        Summarize the main topic in one sentence.
+  [ 3/20] ok   75069.1 ms        What are the key components described?
+  [ 4/20] ok   70808.3 ms  [ADV] What was the closing share price of Acme Corp on
+  [ 5/20] ok   69568.8 ms        List any limitations or caveats mentioned.
+  [ 6/20] ok   66767.0 ms        What problem does the described system solve?
+  [ 7/20] ok   67492.6 ms        Are there any configuration options discussed?
+  [ 8/20] ok   71590.4 ms        What technologies are referenced?
+  [ 9/20] ok   45455.6 ms        Describe the overall architecture briefly.
+  [10/20] ok   78222.7 ms  [ADV] How many employees does the Antarctic branch off
+  [11/20] ok   77413.0 ms        What is the recommended way to get started?
+  [12/20] ok   63132.5 ms        Are there any security considerations noted?
+  [13/20] ok   65709.2 ms        What is this knowledge base about?
+  [14/20] ok   62400.3 ms        Summarize the main topic in one sentence.
+  [15/20] ok   84427.7 ms        What are the key components described?
+  [16/20] ok   76018.5 ms  [ADV] What is the exact recipe for the author's grandm
+  [17/20] ok   81750.3 ms        List any limitations or caveats mentioned.
+  [18/20] ok   79694.3 ms        What problem does the described system solve?
+  [19/20] ok   78924.0 ms        Are there any configuration options discussed?
+  [20/20] ok   72891.1 ms        What technologies are referenced?
+
+[latency_demo_with_eval] 20/20 requests succeeded
+[latency_demo_with_eval] client-observed round-trip avg: 69842.4 ms (includes network + full server handling + judging)
+
+=============================================================================
+Per-stage latency (in-process ring buffer, last 1000 samples/stage)
+=============================================================================
+stage                 count    p50_ms    p95_ms    p99_ms   mean_ms    max_ms
+-----------------------------------------------------------------------------
+query_processing         77    0.004    0.007    0.107    0.009    0.400
+embedding                77  241.714  589.857 1488.381  329.437 3312.361
+vector_retrieval         77    3.564   35.660   66.163    7.692   83.136
+metadata_filtering       77    0.006    0.007    0.008    0.006    0.009
+reranking                77    0.004    0.005    0.005    0.004    0.005
+prompt_stitching         77    0.010    0.017    0.018    0.012    0.018
+llm_generation           77 2858.962 3924.630 5614.170 3040.762 8963.831
+post_processing          77    0.006    0.009    0.010    0.006    0.012
+judge                   171 6687.617 9196.59510437.640 6770.47511143.034
+-----------------------------------------------------------------------------
+total samples recorded across stages: 787
+
+[latency_demo_with_eval] JUDGE stage recorded 171 samples (p50=6687.617 ms) -- judge cost is now visible separately from llm_generation.

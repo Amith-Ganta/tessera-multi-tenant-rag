@@ -125,3 +125,111 @@ def test_skip_decision_is_logged_with_reason(monkeypatch):
     assert "action=skipped" in line
     assert "reason=high_confidence" in line
     assert "top1=0.99" in line
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 Part 2 -- single retrieval pass; retrieve_hybrid can return scores,
+# and the adaptive path no longer issues a second vector-store lookup.
+# ---------------------------------------------------------------------------
+
+from src.rag import retriever_dense, retriever_hybrid  # noqa: E402
+
+
+class _FakeEmbeddings:
+    """Minimal embeddings stub — returns a fixed-length zero vector.
+
+    retriever_dense._embed_query calls vectorstore.embeddings.embed_query(question).
+    The vector value does not matter for counting purposes; we just need a list so
+    similarity_search_by_vector_with_relevance_scores gets a valid argument.
+    """
+
+    def embed_query(self, text: str) -> list[float]:
+        return [0.0] * 4
+
+
+class _FakeVectorStore:
+    """Counts every scored similarity query so a test can prove exactly one happened.
+
+    retriever_dense now calls:
+      - vectorstore.embeddings.embed_query(question)  [for the embedding]
+      - vectorstore.similarity_search_by_vector_with_relevance_scores(embedding, k)
+      - vectorstore.similarity_search_by_vector(embedding, k)  [non-scored path]
+
+    We match those exact method names and signatures so the fake is actually called.
+    """
+
+    def __init__(self, docs_with_scores: list[tuple[Document, float]]) -> None:
+        self._scored = docs_with_scores
+        self.embeddings = _FakeEmbeddings()
+        self.query_count = 0
+
+    def similarity_search_by_vector_with_relevance_scores(
+        self, embedding: list[float], k: int
+    ):
+        self.query_count += 1
+        return list(self._scored)[:k]
+
+    def similarity_search_by_vector(self, embedding: list[float], k: int):
+        self.query_count += 1
+        return [doc for doc, _ in self._scored][:k]
+
+
+def _install_fake_store(monkeypatch, scored):
+    store = _FakeVectorStore(scored)
+    monkeypatch.setattr(retriever_dense, "get_vectorstore", lambda: store)
+    # Isolate the dense arm: no BM25/corpus access during these tests.
+    monkeypatch.setattr(retriever_hybrid, "retrieve_sparse", lambda q, top_k: [])
+    return store
+
+
+def test_return_scores_true_yields_document_score_tuples(monkeypatch):
+    """return_scores=True -> list of (Document, float) with the dense scores."""
+    scored = [(Document(page_content="a", metadata={"source": "a.md"}), 0.83),
+              (Document(page_content="b", metadata={"source": "b.md"}), 0.41)]
+    _install_fake_store(monkeypatch, scored)
+
+    out = retriever_hybrid.retrieve_hybrid("q", top_k=2, return_scores=True)
+
+    assert isinstance(out, list) and out
+    for item in out:
+        assert isinstance(item, tuple) and len(item) == 2
+        doc, score = item
+        assert isinstance(doc, Document)
+        assert isinstance(score, float)
+    # The top-ranked tuple carries the top-1 dense similarity from the first pass.
+    assert out[0][1] == 0.83
+
+
+def test_return_scores_false_yields_bare_documents(monkeypatch):
+    """Default (return_scores=False) is unchanged: a list of Documents."""
+    scored = [(Document(page_content="a", metadata={"source": "a.md"}), 0.83),
+              (Document(page_content="b", metadata={"source": "b.md"}), 0.41)]
+    _install_fake_store(monkeypatch, scored)
+
+    out = retriever_hybrid.retrieve_hybrid("q", top_k=2)
+
+    assert out and all(isinstance(d, Document) for d in out)
+    assert not any(isinstance(d, tuple) for d in out)
+
+
+def test_adaptive_path_queries_vectorstore_exactly_once(monkeypatch):
+    """The adaptive path must retrieve once, not twice.
+
+    Before Phase 3 the adaptive path hit the vector store twice per request (once
+    for retrieval, once to recover the top-1 score). It now reuses the first-pass
+    scores, so the store is queried exactly once.
+    """
+    scored = [(Document(page_content="a", metadata={"source": "a.md"}), 0.72),
+              (Document(page_content="b", metadata={"source": "b.md"}), 0.30)]
+    store = _install_fake_store(monkeypatch, scored)
+
+    # Keep the rest of the pipeline off the network: skip the re-ranker and stub
+    # the LLM so only retrieval is exercised.
+    monkeypatch.setattr(strategies, "rerank", _RerankSpy())
+    monkeypatch.setattr(strategies, "_llm", lambda model, messages, **kw: ("ans", strategies._zero_usage()))
+
+    result = strategies._adaptive_impl("q", top_k=2, model="m", force_route="vector")
+
+    assert store.query_count == 1
+    # Sanity: the reused first-pass score reached the guard signal.
+    assert result["top1_similarity"] == 0.72

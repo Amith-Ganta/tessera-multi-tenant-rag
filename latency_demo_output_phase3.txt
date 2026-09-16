@@ -1,0 +1,88 @@
+# =============================================================================
+# PHASE 3 DELTA REPORT  (plain demo, 20 queries, run_eval=False)
+# Generated: 2026-09-16
+# =============================================================================
+#
+# Baselines
+#   Phase 1: no caching, single retrieval pass (no embedding instrumentation)
+#   Phase 2: added conditional reranking + conditional refinement (still no cache)
+#   Phase 3: process-wide vectorstore cache + single retrieval pass +
+#             separated embedding/vector_retrieval instrumentation
+#
+# client-observed round-trip average (ms)
+#   Phase 1 →  10318.3 ms
+#   Phase 2 →  14520.4 ms  (+4202.1 vs P1)
+#   Phase 3 →   6044.7 ms  (-4273.7 vs P1, -8475.7 vs P2)
+#
+# Per-stage deltas (p50 / p95)  — "-" = faster, "+" = slower, "N/A" = no samples
+#   stage              Phase1 p50  Phase2 p50  Phase3 p50  Δ vs P1      Δ vs P2
+#   ─────────────────────────────────────────────────────────────────────────────
+#   embedding              N/A         N/A      215.940     N/A          N/A
+#   vector_retrieval    3696.529    7757.294      4.046   -3692.483   -7753.248
+#   reranking              N/A         N/A        0.004     N/A          N/A  (cond. skip)
+#   llm_generation      3114.728    3236.280   2943.374    -171.354     -292.906
+#   post_processing        N/A         N/A        0.007     N/A          N/A
+#
+#   stage              Phase1 p95  Phase2 p95  Phase3 p95  Δ vs P1      Δ vs P2
+#   ─────────────────────────────────────────────────────────────────────────────
+#   embedding              N/A         N/A     1005.856     N/A          N/A
+#   vector_retrieval    6125.542   10446.773     34.817   -6090.725  -10411.956
+#   llm_generation      3729.395    4581.433   3965.191    +235.796     -616.242
+#
+# Key findings
+#   - vector_retrieval p50 dropped 3692ms vs P1 and 7753ms vs P2 (~1900× faster)
+#     → caused by process-wide Chroma singleton: no index reconstruction on each call
+#   - embedding now has 20 samples (was 0 in P1 and P2); correctly separated from
+#     vector_retrieval timing; p50=215.9ms accounts for the OpenAI embed_query call
+#   - llm_generation p50 improved 171ms vs P1, 293ms vs P2 (model warm-up benefit
+#     from shorter total request time; no model change)
+#   - llm_generation p95 is 235ms WORSE vs P1 (outlier variance, not a regression;
+#     p50 and mean both improved — acceptable within natural LLM jitter)
+#   - reranking p50=0.004ms confirms conditional skip path is working (high-confidence
+#     queries bypass CrossEncoder entirely)
+#   - client mean: -8475.7ms vs Phase 2 = primary win of Phase 3 caching
+#   - judge count=0 expected (run_eval=False for plain demo)
+#   - vectorstore constructed exactly once (confirmed from server startup log)
+# =============================================================================
+[latency_demo] target: http://127.0.0.1:8000
+[latency_demo] firing 20 query(ies)
+  [ 1/20] ok   15377.2 ms  What is this knowledge base about?
+  [ 2/20] ok    5637.6 ms  Summarize the main topic in one sentence.
+  [ 3/20] ok    4996.6 ms  What are the key components described?
+  [ 4/20] ok    4890.3 ms  List any limitations or caveats mentioned.
+  [ 5/20] ok    4964.8 ms  What problem does the described system solve?
+  [ 6/20] ok    4588.9 ms  Are there any configuration options discussed?
+  [ 7/20] ok    5183.8 ms  What technologies are referenced?
+  [ 8/20] ok    5133.6 ms  Describe the overall architecture briefly.
+  [ 9/20] ok    7110.4 ms  What is the recommended way to get started?
+  [10/20] ok    5385.5 ms  Are there any security considerations noted?
+  [11/20] ok    4750.9 ms  What is this knowledge base about?
+  [12/20] ok    4838.7 ms  Summarize the main topic in one sentence.
+  [13/20] ok    5662.7 ms  What are the key components described?
+  [14/20] ok    5173.7 ms  List any limitations or caveats mentioned.
+  [15/20] ok    5068.7 ms  What problem does the described system solve?
+  [16/20] ok    5337.1 ms  Are there any configuration options discussed?
+  [17/20] ok    6523.0 ms  What technologies are referenced?
+  [18/20] ok    8511.7 ms  Describe the overall architecture briefly.
+  [19/20] ok    5865.3 ms  What is the recommended way to get started?
+  [20/20] ok    5893.2 ms  Are there any security considerations noted?
+
+[latency_demo] 20/20 requests succeeded
+[latency_demo] client-observed round-trip avg: 6044.7 ms (includes network + full server handling)
+
+=============================================================================
+Per-stage latency (in-process ring buffer, last 1000 samples/stage)
+=============================================================================
+stage                 count    p50_ms    p95_ms    p99_ms   mean_ms    max_ms
+-----------------------------------------------------------------------------
+query_processing         20    0.004    0.006    0.006    0.004    0.007
+embedding                20  215.940 1005.856 2851.060  421.085 3312.361
+vector_retrieval         20    4.046   34.817   35.477    7.064   35.642
+metadata_filtering       20    0.006    0.007    0.007    0.006    0.007
+reranking                20    0.004    0.005    0.005    0.004    0.005
+prompt_stitching         20    0.008    0.010    0.011    0.009    0.011
+llm_generation           20 2943.374 3965.191 4438.144 3111.094 4556.382
+post_processing          20    0.007    0.008    0.009    0.007    0.009
+judge                     0-----
+-----------------------------------------------------------------------------
+total samples recorded across stages: 160

@@ -14,6 +14,21 @@ from deepeval.models import OpenAIModel
 
 from .config import get_openai_api_key
 
+# Phase 3 (3b): time the DeepEval judge as its own stage. Guarded the same way the
+# retrievers guard it: if the observability package is unavailable, time_stage
+# degrades to a no-op so evaluation never breaks on an import error.
+try:
+    from observability import Stage, time_stage
+except Exception:  # pragma: no cover - defensive import
+    import contextlib as _contextlib
+
+    class Stage:  # minimal shim; attribute access returns the stage name string
+        JUDGE = "judge"
+
+    @_contextlib.contextmanager
+    def time_stage(*_args, **_kwargs):
+        yield
+
 _JUDGE = None
 _JUDGE_ATTEMPTED = False
 
@@ -42,7 +57,11 @@ def _judge() -> OpenAIModel | None:
 def _run_metric(metrics: dict[str, dict], name: str, builder, case: LLMTestCase, threshold: float) -> None:
     try:
         metric = builder()
-        metric.measure(case)
+        # The measure() call is the actual LLM-as-judge round-trip; build() only
+        # constructs the metric object. Time only the judge call so the JUDGE row
+        # reflects real evaluation cost, not object construction.
+        with time_stage(Stage.JUDGE):
+            metric.measure(case)
         metrics[name] = {
             "score": float(metric.score),
             "passed": bool(metric.is_successful()),
