@@ -182,3 +182,68 @@ def complete(
         span.finish(usage=usage, model=served_by, estimated_cost_usd=cost)
 
     return content, usage
+
+
+def complete_stream(
+    model: str,
+    messages: list[dict[str, str]],
+    *,
+    temperature: float = 0,
+    on_token: "Callable[[str], None] | None" = None,
+) -> tuple[str, dict[str, int]]:
+    """Run one chat completion with streaming, yielding tokens via on_token callback.
+
+    Calls LiteLLM with stream=True; each text chunk is passed to on_token as it
+    arrives. Returns (full_content, usage) after the stream is exhausted.
+    Usage comes from the final streamed chunk (stream_options usage_delta).
+    """
+    from typing import Callable  # noqa: F401 — type hint only
+    _check_budget()
+
+    primary_id, primary_key = resolve_model(model)
+
+    standby_keys = _keys_for_fallback()
+    fallbacks = []
+    for litellm_id in _FALLBACK_CHAIN:
+        if litellm_id == primary_id:
+            continue
+        if litellm_id in standby_keys:
+            fallbacks.append({"model": litellm_id, "api_key": standby_keys[litellm_id]})
+
+    kwargs: dict = dict(
+        model=primary_id,
+        messages=messages,
+        api_key=primary_key,
+        temperature=temperature,
+        max_tokens=MAX_OUTPUT_TOKENS,
+        num_retries=2,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+    if fallbacks:
+        kwargs["fallbacks"] = fallbacks
+
+    chunks_text: list[str] = []
+    usage: dict[str, int] = {"prompt": 0, "completion": 0, "total": 0}
+
+    response_stream = completion(**kwargs)
+    served_by = primary_id
+    for chunk in response_stream:
+        delta_content = chunk.choices[0].delta.content if chunk.choices else None
+        if delta_content:
+            chunks_text.append(delta_content)
+            if on_token is not None:
+                on_token(delta_content)
+        # Capture usage from final chunk (some providers send it on the last chunk)
+        chunk_usage = getattr(chunk, "usage", None)
+        if chunk_usage is not None:
+            usage = _usage_dict(chunk)
+        # Track actual model served
+        if getattr(chunk, "model", None):
+            served_by = chunk.model
+
+    full_content = "".join(chunks_text)
+    cost = _estimate_usd(served_by, usage["prompt"], usage["completion"])
+    record_spend(cost)
+    return full_content, usage

@@ -288,10 +288,14 @@ def _llm(
     messages: list[dict[str, str]],
     *,
     json_mode: bool = False,
+    on_token: "Callable[[str], None] | None" = None,
 ) -> tuple[str, dict[str, int]]:
     # Single choke point for every strategy. Delegating to complete() gives all
     # of them provider fallback (DeepSeek -> OpenAI), the per-call output cap, the
     # daily spend guard, and LangSmith tracing without repeating that logic here.
+    if on_token is not None:
+        from .llm import complete_stream
+        return complete_stream(model, messages, temperature=0, on_token=on_token)
     return complete(model, messages, json_mode=json_mode, temperature=0)
 
 
@@ -308,6 +312,7 @@ def _adaptive_impl(
     model: str,
     force_route: str | None = None,
     feedback: str | None = None,
+    on_token: "Callable[[str], None] | None" = None,
 ) -> dict:
     trace: list[str] = []
     usage = _zero_usage()
@@ -382,7 +387,7 @@ def _adaptive_impl(
 
     # Stage: llm_generation -- the answer generation call.
     with time_stage(Stage.LLM_GENERATION):
-        answer, usage_delta = _llm(model, messages)
+        answer, usage_delta = _llm(model, messages, on_token=on_token)
     _add_usage(usage, usage_delta)
 
     # Stage: post_processing -- assemble the response payload the handler returns.
@@ -409,8 +414,9 @@ def _strategy_adaptive(
     model: str,
     force_route: str | None = None,
     feedback: str | None = None,
+    on_token: "Callable[[str], None] | None" = None,
 ) -> dict:
-    return _adaptive_impl(question, top_k, model, force_route, feedback)
+    return _adaptive_impl(question, top_k, model, force_route, feedback, on_token)
 
 
 def _strategy_corrective(
@@ -728,6 +734,7 @@ def run_strategy(
     retries: int = 2,
     force_route: str | None = None,
     feedback: str | None = None,
+    on_token: "Callable[[str], None] | None" = None,
 ) -> dict:
     allowed = {"adaptive", "corrective", "cache", "autonomous", "multi_agent"}
     if strategy not in allowed:
@@ -737,7 +744,7 @@ def run_strategy(
     # generation. Corrective already self-refines with its own internal judge loop,
     # so the runtime guard targets adaptive; the other strategies ignore feedback.
     if strategy == "adaptive":
-        return _strategy_adaptive(question, top_k, model, force_route, feedback)
+        return _strategy_adaptive(question, top_k, model, force_route, feedback, on_token)
     if strategy == "corrective":
         return _strategy_corrective(question, top_k, model, retries)
     if strategy == "cache":

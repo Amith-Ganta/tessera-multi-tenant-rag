@@ -445,6 +445,139 @@ async def ask(
     # This means cache lookups happen AFTER retrieval (after chunk IDs are known).
     _cache_key: str | None = None
 
+    # Phase 4c-fix: for SSE clients, run the strategy in a thread and stream
+    # tokens as they arrive via an asyncio.Queue bridge. The queue is drained by
+    # the async generator below; a None sentinel signals end-of-stream. For
+    # non-SSE clients the old synchronous path is unchanged.
+    import asyncio
+    _is_sse = "text/event-stream" in request.headers.get("accept", "")
+
+    def _run_strategy_sync(on_token=None) -> dict:
+        """Execute the full strategy block synchronously (called from executor)."""
+        with trace_run(strategy, payload.question, tenant) as _span:
+            with use_tenant(tenant):
+                if payload.run_eval and JUDGE_MODE == "async":
+                    _r = run_strategy(
+                        strategy, payload.question, top_k=top_k, model=model,
+                        force_route=fr, on_token=on_token,
+                    )
+                elif payload.run_eval:
+                    _r = guarded_answer(
+                        strategy,
+                        payload.question,
+                        top_k=top_k,
+                        model=model,
+                        force_route=fr,
+                        run_strategy_fn=run_strategy,
+                        evaluate_fn=evaluate_answer,
+                        expected_output=payload.expected_output,
+                        on_token=on_token,
+                    )
+                else:
+                    _r = run_strategy(
+                        strategy, payload.question, top_k=top_k, model=model,
+                        force_route=fr, on_token=on_token,
+                    )
+            _span.finish(route=_r.get("route", ""), answer=_r.get("answer", ""))
+        return _r
+
+    if _is_sse:
+        # Real streaming: bridge sync LLM thread → async SSE generator via stdlib Queue.
+        # Using threading.Thread + queue.Queue (not asyncio.Queue) is TestClient-safe:
+        # the thread runs independently of the event loop, and the generator awaits
+        # each item via run_in_executor so the loop is never blocked.
+        import queue as _queue_module
+        import threading as _threading_module
+
+        _sync_q: _queue_module.Queue = _queue_module.Queue()
+        _sse_start = time.perf_counter()
+        _result_holder: list = []
+        _sentinel = object()  # unique sentinel to signal end-of-stream
+
+        def _on_token_callback(token: str) -> None:
+            _sync_q.put(token)
+
+        def _thread_target() -> None:
+            try:
+                result_dict = _run_strategy_sync(on_token=_on_token_callback)
+                _result_holder.append(result_dict)
+            except Exception:  # noqa: BLE001
+                _result_holder.append({})
+            finally:
+                _sync_q.put(_sentinel)  # always signal end regardless of error
+
+        _worker = _threading_module.Thread(target=_thread_target, daemon=True)
+        _worker.start()
+
+        async def _sse_generator():
+            _loop = asyncio.get_running_loop()
+            try:
+                while True:
+                    # Await each queue item without blocking the event loop.
+                    item = await _loop.run_in_executor(None, _sync_q.get)
+                    if item is _sentinel:
+                        break
+                    yield f"data: {json.dumps({'token': item})}\n\n"
+            finally:
+                _worker.join(timeout=60)
+
+            # Thread has finished; assemble full response and emit done event.
+            _r = _result_holder[0] if _result_holder else {}
+            _latency_ms = (time.perf_counter() - _sse_start) * 1000
+            _usage = _r.get("usage") or {"prompt": 0, "completion": 0, "total": 0}
+            _tokens = {
+                "prompt": int(_usage.get("prompt", 0) or 0),
+                "completion": int(_usage.get("completion", 0) or 0),
+                "total": int(_usage.get("total", 0) or 0),
+            }
+            _token_sum = _tokens["prompt"] + _tokens["completion"]
+            _cost = (_token_sum / 1_000_000) * DEEPSEEK_CHAT_USD_PER_1M_TOKENS_ESTIMATED
+            _eval_result: dict | None = None
+            _guard = None
+            if payload.run_eval and JUDGE_MODE == "async":
+                import uuid as _uuid
+                _trace_id = str(_uuid.uuid4())
+                _chunk_ids = _r.get("sources", []) or []
+                _c_key = SemanticCache.make_key(payload.question, _chunk_ids, model) if CACHE_ENABLED else None
+                _cache_pl = {
+                    "answer": _r.get("answer", ""),
+                    "route": _r.get("route", ""),
+                    "strategy": _r.get("strategy", strategy),
+                    "sources": _chunk_ids,
+                    "usage": _usage,
+                    "trace": _r.get("trace", []) or [],
+                }
+                submit_judge(
+                    trace_id=_trace_id,
+                    question=payload.question,
+                    answer=_r.get("answer", ""),
+                    contexts=_chunk_ids,
+                    evaluate_fn=evaluate_answer,
+                    cache_key=_c_key if CACHE_ENABLED else None,
+                    cache_payload=_cache_pl if CACHE_ENABLED else None,
+                )
+                _eval_result = {"status": "pending", "trace_id": _trace_id}
+            else:
+                _eval_result = _r.get("eval")
+                _guard = _r.get("guard")
+            _ask_resp = AskResponse(
+                answer=_r.get("answer", ""),
+                route=_r.get("route", ""),
+                strategy=_r.get("strategy", strategy),
+                model=model,
+                sources=_r.get("sources", []) or [],
+                latency_ms=_latency_ms,
+                tokens=_tokens,
+                estimated_cost_usd=_cost,
+                tenant=tenant,
+                eval=_eval_result,
+                guard=_guard,
+                trace=_r.get("trace", []) or [],
+            )
+            yield f"data: {json.dumps({'done': True, 'meta': _ask_resp.model_dump()})}\n\n"
+
+        return StreamingResponse(_sse_generator(), media_type="text/event-stream")
+
     start = time.perf_counter()
     with trace_run(strategy, payload.question, tenant) as run_span:
         with use_tenant(tenant):
@@ -596,24 +729,6 @@ async def ask(
         guard=guard,
         trace=result.get("trace", []) or [],
     )
-
-    # Phase 4c: if the client accepts SSE, stream token events then a final
-    # event containing the full 14-field meta. The strategy has already run
-    # synchronously above; we split the completed answer into whitespace-separated
-    # tokens and yield them one by one so clients can display progressive output
-    # without changing the server-side generation logic.
-    accept = request.headers.get("accept", "")
-    if "text/event-stream" in accept:
-        async def _sse_generator():
-            answer_text = ask_response.answer
-            words = answer_text.split(" ")
-            for i, word in enumerate(words):
-                token = word if i == 0 else " " + word
-                yield f"data: {json.dumps({'token': token})}\n\n"
-            meta = ask_response.model_dump()
-            yield f"data: {json.dumps({'done': True, 'meta': meta})}\n\n"
-
-        return StreamingResponse(_sse_generator(), media_type="text/event-stream")
 
     return ask_response
 

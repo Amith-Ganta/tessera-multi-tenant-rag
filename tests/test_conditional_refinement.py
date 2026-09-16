@@ -30,7 +30,7 @@ def _make_strategy_fn(top1, *, record=None):
     """
     calls = {"n": 0}
 
-    def run_strategy_fn(strategy, question, *, top_k, model, force_route, feedback):
+    def run_strategy_fn(strategy, question, *, top_k, model, force_route, feedback, on_token=None):
         calls["n"] += 1
         if record is not None:
             record.append(feedback)

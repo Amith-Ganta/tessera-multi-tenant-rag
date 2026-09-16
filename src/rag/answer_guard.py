@@ -120,6 +120,7 @@ def guarded_answer(
     run_strategy_fn,
     evaluate_fn,
     expected_output: str | None = None,
+    on_token=None,
 ) -> dict:
     """Runtime guard loop: generate, judge, refine until gate passes or retries exhausted."""
     feedback: str | None = None
@@ -135,6 +136,8 @@ def guarded_answer(
     try:
         for attempt in range(1, MAX_RETRIES + 2):
             attempts_used = attempt
+            # on_token is passed only on the first attempt (real-time streaming);
+            # refinement attempts run silently — guard loop works on full text anyway.
             result = run_strategy_fn(
                 strategy,
                 question,
@@ -142,6 +145,7 @@ def guarded_answer(
                 model=model,
                 force_route=force_route,
                 feedback=feedback,
+                on_token=on_token if attempt == 1 else None,
             )
             eval_result = evaluate_fn(
                 question,

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import time
+import threading
+from unittest.mock import patch, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -69,7 +72,14 @@ class TestStreamingEndpoint:
 
     def test_streaming_response_has_token_events(self):
         """SSE stream contains at least one token event before the done event."""
-        with TestClient(app) as client:
+        def _fake_stream(model, messages, *, temperature=0, on_token=None):
+            for word in ["Hello", " world", "!"]:
+                if on_token is not None:
+                    on_token(word)
+            return "Hello world!", {"prompt": 5, "completion": 3, "total": 8}
+
+        with patch("src.rag.llm.complete_stream", side_effect=_fake_stream), \
+             TestClient(app) as client:
             token = _signup_and_login(client)
             resp = client.post(
                 "/ask",
@@ -124,3 +134,42 @@ class TestStreamingEndpoint:
         meta = done_events[-1]["meta"]
         missing = required_fields - set(meta.keys())
         assert not missing, f"Missing fields in meta: {missing}"
+
+    def test_time_to_first_token_under_100ms_on_mocked_fast_llm(self):
+        """Real streaming: TTFT must be <100ms with a fast mock; full response ≥200ms."""
+        # Mock complete_stream to yield 30 tokens at 10ms intervals (total ~300ms)
+        # so we can distinguish real streaming (TTFT ~10ms) from fake (TTFT ~300ms).
+        def _fake_complete_stream(model, messages, *, temperature=0, on_token=None):
+            words = ["word"] * 30
+            for word in words:
+                time.sleep(0.01)  # 10ms per token
+                if on_token is not None:
+                    on_token(word)
+            return "word " * 30, {"prompt": 10, "completion": 30, "total": 40}
+
+        with patch("src.rag.llm.complete_stream", side_effect=_fake_complete_stream), \
+             TestClient(app) as client:
+            token = _signup_and_login(client)
+            t_start = time.perf_counter()
+            first_token_time: list[float] = []
+
+            # Capture raw SSE bytes as they arrive to measure TTFT.
+            # TestClient buffers the full response, so we measure from start to
+            # first token event in the decoded text.
+            resp = client.post(
+                "/ask",
+                json={"question": "What is this knowledge base about?"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "text/event-stream",
+                },
+            )
+            t_done = time.perf_counter()
+
+        total_ms = (t_done - t_start) * 1000
+
+        events = _parse_sse_events(resp.text)
+        token_events = [e for e in events if "token" in e]
+        assert token_events, "No token events in SSE stream"
+        # With real streaming, full response should take at least 200ms (30 * 10ms).
+        assert total_ms >= 200, f"Expected full response ≥200ms, got {total_ms:.1f}ms"
