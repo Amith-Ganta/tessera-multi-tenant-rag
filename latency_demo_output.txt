@@ -1,0 +1,41 @@
+[latency_demo] target: http://127.0.0.1:8000
+[latency_demo] firing 20 query(ies)
+  [ 1/20] ok   25386.7 ms  What is this knowledge base about?
+  [ 2/20] ok   10086.4 ms  Summarize the main topic in one sentence.
+  [ 3/20] ok    9095.2 ms  What are the key components described?
+  [ 4/20] ok    9773.0 ms  List any limitations or caveats mentioned.
+  [ 5/20] ok    9612.5 ms  What problem does the described system solve?
+  [ 6/20] ok    8331.7 ms  Are there any configuration options discussed?
+  [ 7/20] ok    8853.4 ms  What technologies are referenced?
+  [ 8/20] ok    8655.0 ms  Describe the overall architecture briefly.
+  [ 9/20] ok    9436.4 ms  What is the recommended way to get started?
+  [10/20] ok    8227.4 ms  Are there any security considerations noted?
+  [11/20] ok   12469.4 ms  What is this knowledge base about?
+  [12/20] ok   11136.6 ms  Summarize the main topic in one sentence.
+  [13/20] ok    9607.5 ms  What are the key components described?
+  [14/20] ok    9443.5 ms  List any limitations or caveats mentioned.
+  [15/20] ok    9359.3 ms  What problem does the described system solve?
+  [16/20] ok    8422.9 ms  Are there any configuration options discussed?
+  [17/20] ok    9277.6 ms  What technologies are referenced?
+  [18/20] ok    8368.9 ms  Describe the overall architecture briefly.
+  [19/20] ok   11111.9 ms  What is the recommended way to get started?
+  [20/20] ok    9710.4 ms  Are there any security considerations noted?
+
+[latency_demo] 20/20 requests succeeded
+[latency_demo] client-observed round-trip avg: 10318.3 ms (includes network + full server handling)
+
+=============================================================================
+Per-stage latency (in-process ring buffer, last 1000 samples/stage)
+=============================================================================
+stage                 count    p50_ms    p95_ms    p99_ms   mean_ms    max_ms
+-----------------------------------------------------------------------------
+query_processing         20    0.004    0.005    0.005    0.004    0.005
+embedding                 0-----
+vector_retrieval         20 3696.529 6125.54214826.474 4516.79517001.706
+metadata_filtering       20    0.006    0.010    0.010    0.007    0.010
+reranking                 0-----
+prompt_stitching         20    0.009    0.011    0.013    0.009    0.013
+llm_generation           20 3114.728 3729.395 4269.952 3249.562 4405.092
+post_processing          20    0.006    0.007    0.007    0.006    0.007
+-----------------------------------------------------------------------------
+total samples recorded across stages: 120
