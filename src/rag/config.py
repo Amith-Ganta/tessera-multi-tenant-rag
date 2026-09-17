@@ -95,3 +95,29 @@ JUDGE_STORE_MAX = 5000
 # In sync mode the cache is written only if both guard and judge passed.
 CACHE_ENABLED = True
 CACHE_TTL_SECONDS = 21600  # 6 hours
+
+# Phase 5 — Redis judge queue (Pattern 4: Message Queue).
+# When JUDGE_QUEUE_ENABLED=True the FastAPI process publishes judge jobs to
+# Redis instead of spawning in-process asyncio tasks.  A separate judge_worker.py
+# process drains the queue with a bounded pool (JUDGE_WORKER_CONCURRENCY).
+JUDGE_QUEUE_ENABLED = True
+JUDGE_QUEUE_NAME = "judge:queue"
+JUDGE_RESULTS_PREFIX = "judge:result:"
+JUDGE_QUEUE_MAX_DEPTH = 100
+JUDGE_WORKER_CONCURRENCY = 3
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
+# Phase 5 — Rate limiting (Pattern 2).
+RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "100"))
+
+# Phase 5 — Circuit breaker (Pattern 5).
+CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
+CIRCUIT_BREAKER_RECOVERY_SECONDS = 30
+
+# Phase 5 — Bulkhead connection pools (Pattern 5).
+MAIN_POOL_SIZE = 10
+JUDGE_POOL_SIZE = 3
+
+# Phase 5 — Redis checkpointer (Pattern 6: Statelessness).
+CHECKPOINTER_BACKEND = os.environ.get("CHECKPOINTER_BACKEND", "sqlite")  # "sqlite" | "redis"
+CHECKPOINTER_TTL_SECONDS = 86400  # 24 hours

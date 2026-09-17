@@ -389,13 +389,31 @@ Then open:
 - API docs: `http://localhost:8000/docs`
 - Health: `curl http://localhost:8000/health`
 
-### Run with Docker
+### Run with Docker (Phase 5: Redis queue mode)
 
-The build context is the repository root; the Dockerfile lives in `deploy/`, and `.dockerignore` stays at the root because Docker only reads it from the context root.
+The project root `docker-compose.yml` starts three services: Redis, the FastAPI API, and the judge worker. The judge worker drains the Redis queue with three concurrent goroutines (bounded) instead of the old unbounded in-process approach.
+
+```bash
+# Start Redis + API + judge worker together
+docker compose up --build
+```
+
+The legacy A2A compose file (`deploy/docker-compose.yml`) still works for the A2A multi-agent mode:
 
 ```bash
 docker compose -f deploy/docker-compose.yml up --build
 ```
+
+### Run the judge worker standalone (without Docker)
+
+When running the API with `uv run`, start the worker in a second terminal so judge jobs are processed:
+
+```bash
+# Terminal 3: judge worker (reads from Redis, bounded concurrency=3)
+uv run python judge_worker.py
+```
+
+The API falls back to in-process async task scheduling automatically when Redis is unreachable, so the worker is optional for local development.
 
 ---
 

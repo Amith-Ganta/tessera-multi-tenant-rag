@@ -11,3 +11,5 @@
 a2a-sdk>=0.3.0
 # Alternative community implementation (uncomment to use instead):
 # python-a2a>=0.3.0
+redis>=5.0.0
+fakeredis>=2.20.0

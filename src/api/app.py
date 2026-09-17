@@ -398,6 +398,38 @@ async def ask(
     if any(phrase in lowered_question for phrase in blocked_phrases):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="request blocked by input guard")
 
+    # Phase 5: per-tenant rate limit for /ask.
+    try:
+        from src.resilience.rate_limiter import RateLimiter, RateLimitError as _RLError
+        _rl = RateLimiter()
+        _rl.check(tenant)
+    except Exception as _rl_exc:
+        _rl_name = type(_rl_exc).__name__
+        if _rl_name == "RateLimitError":
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                content={"error": "rate limit exceeded", "detail": str(_rl_exc)},
+                headers={"Retry-After": "60"},
+            )
+        # Redis down or other error — fail open, log and continue.
+        import logging as _logging
+        _logging.getLogger(__name__).warning("rate limiter error (fail-open): %s", _rl_exc)
+
+    # Phase 5: reject early when the judge queue is at capacity so the caller
+    # can back off instead of piling up work the system cannot drain.
+    if payload.run_eval and JUDGE_MODE == "async":
+        from src.rag.config import JUDGE_QUEUE_ENABLED
+        if JUDGE_QUEUE_ENABLED:
+            from src.judge.redis_queue import judge_queue as _jq
+            if _jq.is_over_capacity():
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    content={"error": "judge queue at capacity", "queue_depth": _jq.queue_depth()},
+                    headers={"Retry-After": "60"},
+                )
+
     strategy = payload.strategy or DEFAULT_STRATEGY
     if strategy not in ALLOWED_STRATEGIES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"unknown strategy: {strategy}")
@@ -740,10 +772,19 @@ def eval_result_endpoint(
     """Poll the result of an async judge run.
 
     Returns 202 while the judge is still running, 200 when done, 404 if the
-    trace_id is unknown.  The judge_store is a process-wide ring buffer — trace
-    IDs from a different worker or a restarted process will return 404.
+    trace_id is unknown.  In queue mode, checks Redis first (worker writes
+    results there); falls back to the in-process judge_store ring buffer.
     """
-    entry = judge_store.get(trace_id)
+    from src.rag.config import JUDGE_QUEUE_ENABLED
+    entry: dict | None = None
+
+    if JUDGE_QUEUE_ENABLED:
+        from src.judge.redis_queue import judge_queue
+        entry = judge_queue.get_result(trace_id)
+
+    if entry is None:
+        entry = judge_store.get(trace_id)
+
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="trace_id not found")
     if entry.get("status") == "pending":
@@ -783,10 +824,12 @@ def metrics_latency(user: tuple[int, str] = Depends(get_current_user)) -> dict:
         ordered.setdefault(name, stats)
     total = sum(stats.get("count", 0) for stats in ordered.values())
     cache_stats = semantic_cache.stats() if CACHE_ENABLED else None
+    from src.judge.async_runner import get_published_judges
     return {
         "stages": ordered,
         "sample_window": latency_store.max_samples,
         "total_samples": total,
         "cache_hit_rate": cache_stats["hit_rate"] if cache_stats else None,
         "cache_stats": cache_stats,
+        "published_judges": get_published_judges(),
     }
