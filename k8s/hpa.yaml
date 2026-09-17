@@ -1,0 +1,45 @@
+# HPA for the Tessera API deployment.
+# Scales on CPU (primary) and requests/second (custom metric via KEDA or
+# Prometheus adapter).  CPU-based scaling handles synchronous strategy load;
+# requests/sec catches bursty traffic without waiting for CPU lag.
+#
+# Min=2 ensures zero-downtime rolling deploys; Max=10 caps cloud spend.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tessera-api
+  namespace: tessera
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tessera-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+    - type: Pods
+      pods:
+        metric:
+          name: http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: "50"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

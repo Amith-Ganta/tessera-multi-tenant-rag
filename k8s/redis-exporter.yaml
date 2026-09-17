@@ -1,0 +1,60 @@
+# Redis Exporter deployment — exposes Redis metrics (including list lengths)
+# to Prometheus so the worker HPA can consume judge_queue_depth as a custom
+# metric via the custom-metrics-apiserver (e.g. prometheus-adapter).
+#
+# The judge:queue list length is exported as:
+#   redis_list_length{list_name="judge:queue"}
+#
+# Requires: oliver006/redis_exporter image and a running Prometheus scraping
+# the tessera namespace.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-exporter
+  namespace: tessera
+  labels:
+    app: redis-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-exporter
+  template:
+    metadata:
+      labels:
+        app: redis-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9121"
+    spec:
+      containers:
+        - name: redis-exporter
+          image: oliver006/redis_exporter:latest
+          env:
+            - name: REDIS_ADDR
+              value: "redis:6379"
+          ports:
+            - containerPort: 9121
+              name: metrics
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-exporter
+  namespace: tessera
+  labels:
+    app: redis-exporter
+spec:
+  ports:
+    - port: 9121
+      targetPort: 9121
+      name: metrics
+  selector:
+    app: redis-exporter

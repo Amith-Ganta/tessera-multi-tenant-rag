@@ -1,0 +1,50 @@
+# HPA for the judge worker Deployment.
+# Workers are I/O-bound (all time is spent waiting on OpenAI/DeepEval API
+# calls), so CPU is a poor scaling signal.  Instead, we scale on the Redis
+# judge queue depth: when the queue exceeds 50 items, add workers; when it
+# drains below 10, scale down.  This requires a KEDA ScaledObject or a
+# Prometheus Redis Exporter + custom-metrics-apiserver.
+#
+# Using KEDA (recommended):  replace this manifest with a KEDA ScaledObject
+# and remove this HPA (KEDA manages the HPA internally).  The values below
+# document the desired behaviour so a KEDA ScaledObject can be derived.
+#
+# Min=1: at least one worker always drains residual jobs after traffic ebbs.
+# Max=8: at D4=19 s/job and JUDGE_WORKER_CONCURRENCY=3, 8 replicas ≈ 24
+#        parallel judge slots, enough for 1.26 jobs/s sustained throughput.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tessera-judge-worker
+  namespace: tessera
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tessera-judge-worker
+  minReplicas: 1
+  maxReplicas: 8
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: redis_list_length
+          selector:
+            matchLabels:
+              list_name: "judge:queue"
+        target:
+          type: AverageValue
+          averageValue: "50"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
