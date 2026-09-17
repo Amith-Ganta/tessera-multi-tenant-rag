@@ -21,13 +21,28 @@ _redis_client = None
 
 
 def _get_client():
-    """Return (or lazily create) the shared Redis client."""
+    """Return (or lazily create) the shared Redis client.
+
+    The client is created lazily on first use, not at module load, so importing
+    this module never blocks on Redis.  Redis 7 defaults to RESP3, whose
+    handshake can stall under Docker; forcing ``protocol=2`` with short socket
+    timeouts makes failures fast and explicit instead of silently returning an
+    unusable client.  If construction fails, the client is left as ``None`` so
+    the next call retries rather than caching a dead handle.
+    """
     global _redis_client
     if _redis_client is None:
         try:
             import redis as _redis_mod
             from src.rag.config import REDIS_URL
-            _redis_client = _redis_mod.Redis.from_url(REDIS_URL, decode_responses=True)
+            _redis_client = _redis_mod.Redis.from_url(
+                REDIS_URL,
+                decode_responses=True,
+                protocol=2,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+                health_check_interval=30,
+            )
         except Exception as exc:
             logger.warning("Redis client init failed: %s", exc)
             _redis_client = None
@@ -88,7 +103,7 @@ class JudgeQueue:
         if client is None:
             return
         try:
-            client.setex(self._prefix + trace_id, ttl, json.dumps(result))
+            client.set(self._prefix + trace_id, json.dumps(result), ex=ttl)
         except Exception as exc:
             logger.error("set_result failed for trace_id=%s: %s", trace_id, exc)
 
