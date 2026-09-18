@@ -30,6 +30,7 @@ from litellm import completion
 
 from .models import resolve_model, MODEL_REGISTRY
 from src.resilience.circuit_breaker import CircuitBreaker, CircuitOpenError  # noqa: F401
+from src.resilience.bulkhead import main_bulkhead
 
 _llm_breaker = CircuitBreaker(name="llm")
 
@@ -176,7 +177,8 @@ def complete(
     from .observability import trace_llm
 
     with trace_llm(primary_id, messages) as span:
-        response = _llm_breaker.call(completion, **kwargs)
+        with main_bulkhead:
+            response = _llm_breaker.call(completion, **kwargs)
         content = response.choices[0].message.content or ""
         usage = _usage_dict(response)
         served_by = getattr(response, "model", primary_id) or primary_id

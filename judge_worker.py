@@ -31,10 +31,11 @@ async def _process_job(job: dict, queue, evaluate_fn) -> None:
     contexts = job.get("contexts", [])
     t0 = time.perf_counter()
     try:
+        from src.resilience.bulkhead import judge_bulkhead
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
-            lambda: evaluate_fn(question, answer, contexts),
+            lambda: judge_bulkhead.call(evaluate_fn, question, answer, contexts),
         )
         result["status"] = "done"
         duration_ms = (time.perf_counter() - t0) * 1000
