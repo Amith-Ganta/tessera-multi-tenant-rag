@@ -131,3 +131,34 @@ class TestBulkhead:
         with bh:
             assert bh.active == 1
         assert bh.active == 0
+
+
+# ---------------------------------------------------------------------------
+# Circuit breaker wired to LLM provider (1 case)
+# ---------------------------------------------------------------------------
+
+class TestLLMBreakerWiring:
+    def test_breaker_opens_and_blocks_sixth_call(self):
+        """After 5 consecutive provider failures the breaker opens;
+        the 6th call raises CircuitOpenError without invoking the provider."""
+        cb = CircuitBreaker("test-llm-wired", failure_threshold=5, recovery_seconds=60)
+
+        call_count = 0
+
+        def failing_provider(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("provider down")
+
+        for _ in range(5):
+            with pytest.raises(RuntimeError):
+                cb.call(failing_provider)
+
+        assert cb.state == "OPEN"
+        assert call_count == 5
+
+        with pytest.raises(CircuitOpenError):
+            cb.call(failing_provider)
+
+        # Provider must NOT have been invoked on the 6th call.
+        assert call_count == 5
