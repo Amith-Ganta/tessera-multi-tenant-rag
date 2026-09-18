@@ -25,6 +25,7 @@ from typing import Any
 import requests
 
 from src.rag.checkpointer import SQLiteCheckpointer
+from src.state.redis_checkpointer import checkpointer_factory
 from src.rag.config import RETRIEVER_TOP_K
 from src.rag.models import DEFAULT_MODEL
 
@@ -101,7 +102,7 @@ class A2ASupervisor:
     ) -> None:
         self.drafter_url = drafter_url
         self.judge_url = judge_url
-        self.checkpointer = checkpointer or SQLiteCheckpointer()
+        self.checkpointer = checkpointer or checkpointer_factory()
         self.model = model
         self.top_k = top_k
         self.mode = (mode or DEFAULT_MODE).strip().lower()
