@@ -13,6 +13,11 @@ _TENANT_ID_RE = re.compile(r"^[a-z0-9_-]+$")
 
 _active_index_dir: ContextVar[Path | None] = ContextVar("active_index_dir", default=None)
 _active_corpus_dir: ContextVar[Path | None] = ContextVar("active_corpus_dir", default=None)
+_active_tenant_id: ContextVar[str | None] = ContextVar("active_tenant_id", default=None)
+
+
+def active_tenant_id() -> str | None:
+    return _active_tenant_id.get()
 
 
 def _validate_tenant_id(tenant_id: str) -> str:
@@ -43,8 +48,10 @@ def active_corpus_dir() -> Path:
 def use_tenant(tenant_id: str):
     index_token = _active_index_dir.set(tenant_index_dir(tenant_id))
     corpus_token = _active_corpus_dir.set(tenant_corpus_dir(tenant_id))
+    tid_token = _active_tenant_id.set(tenant_id)
     try:
         yield
     finally:
         _active_corpus_dir.reset(corpus_token)
         _active_index_dir.reset(index_token)
+        _active_tenant_id.reset(tid_token)

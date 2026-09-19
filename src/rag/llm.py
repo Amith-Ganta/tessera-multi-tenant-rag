@@ -21,6 +21,7 @@ fast into the existing fallback chain instead of hanging.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from threading import Lock
@@ -28,11 +29,28 @@ from threading import Lock
 import litellm
 from litellm import completion
 
+from .config import MODEL_CANARY_PERCENT, MODEL_CANARY_VERSION
 from .models import resolve_model, MODEL_REGISTRY
+from .tenant_context import active_tenant_id
 from src.resilience.circuit_breaker import CircuitBreaker, CircuitOpenError  # noqa: F401
 from src.resilience.bulkhead import main_bulkhead
 
 _llm_breaker = CircuitBreaker(name="llm")
+
+
+def _select_model(default_model: str) -> str:
+    """Return canary model if the active tenant hashes below the configured canary
+    percent. Falls back to the default for requests without a tenant context, so
+    system calls are never canaried."""
+    if MODEL_CANARY_PERCENT <= 0 or not MODEL_CANARY_VERSION:
+        return default_model
+    tid = active_tenant_id()
+    if tid is None:
+        return default_model
+    h = int(hashlib.sha256(tid.encode()).hexdigest(), 16) % 100
+    if h < MODEL_CANARY_PERCENT:
+        return MODEL_CANARY_VERSION
+    return default_model
 
 # Rough public list prices, only used for a spend estimate and the daily guard.
 # These are estimates, not billed figures; the analytics log records them as such.
@@ -147,6 +165,7 @@ def complete(
     """
     _check_budget()
 
+    model = _select_model(model)
     primary_id, primary_key = resolve_model(model)
 
     # Build the fallback list: every standby whose key is available, minus the
