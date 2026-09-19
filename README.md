@@ -2,6 +2,8 @@
 
 A retrieval-augmented question-answering service for security and compliance documents. It routes each question to the right retrieval strategy, grounds the answer in a per-tenant corpus, checks the answer against a judge model before returning it, and gates its own quality in CI. Every metric quoted below is read straight from a committed report file, not rounded up for effect.
 
+See [docs/CASE_STUDY.md](docs/CASE_STUDY.md) for the problem definition, architecture decisions, evaluation evidence, and operational readiness notes.
+
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/fastapi-0.100+-009688.svg)](https://fastapi.tiangolo.com/)
 [![Streamlit](https://img.shields.io/badge/streamlit-1.28+-ff4b4b.svg)](https://streamlit.io/)
