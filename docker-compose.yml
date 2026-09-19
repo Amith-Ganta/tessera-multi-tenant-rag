@@ -24,7 +24,7 @@ services:
     build:
       context: .
       dockerfile: deploy/Dockerfile
-    command: ["python", "judge_worker.py"]
+    command: ["uv", "run", "python", "judge_worker.py"]
     environment:
       - REDIS_URL=redis://redis:6379/0
       - JUDGE_QUEUE_ENABLED=true

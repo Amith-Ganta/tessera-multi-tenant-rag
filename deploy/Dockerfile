@@ -28,8 +28,8 @@ RUN uv sync --frozen --no-dev
 
 EXPOSE 8000
 
-# Health check hits /health (needs no API keys). Uses stdlib urllib so we install no curl.
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+# Cold start imports torch + deepeval which takes ~16 min on this machine; 900s is honest.
+HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=900s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
 
 CMD ["uv", "run", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
