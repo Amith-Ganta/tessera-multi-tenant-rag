@@ -24,6 +24,7 @@ from src.auth import auth
 from src.judge.judge_store import judge_store
 from src.judge.async_runner import submit_judge
 from src.cache.semantic_cache import semantic_cache, SemanticCache
+from src.security.async_crypto import hash_password_async, verify_password_async
 
 try:
     from observability import latency_store, ALL_STAGES
@@ -213,18 +214,41 @@ def budget() -> dict:
 
 
 @app.post("/auth/signup")
-def signup(payload: SignupRequest) -> dict[str, str]:
-    ok, msg = auth.create_user(payload.email, payload.password)
+async def signup(payload: SignupRequest) -> dict[str, str]:
+    import asyncio as _asyncio
+    if not payload.email or not payload.password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email and password are required.")
+    if len(payload.password) < 6:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must be at least 6 characters long.")
+    email = payload.email.strip().lower()
+    if auth.user_exists(email):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User already exists.")
+    # Hash off the event loop so concurrent signups don't serialise.
+    password_hash = await hash_password_async(payload.password)
+    loop = _asyncio.get_running_loop()
+    ok, msg = await loop.run_in_executor(None, lambda: auth._create_user_with_hash(email, password_hash))
     if not ok:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
     return {"message": msg}
 
 
 @app.post("/auth/login", response_model=LoginResponse)
-def login(payload: LoginRequest) -> LoginResponse:
-    ok, msg, user_id = auth.authenticate_user(payload.email, payload.password)
-    if not ok or user_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=msg)
+async def login(payload: LoginRequest) -> LoginResponse:
+    import asyncio as _asyncio
+    if not payload.email or not payload.password:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email and password are required.")
+    user_id = auth.get_user_id_from_email(payload.email)
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
+    loop = _asyncio.get_running_loop()
+    password_hash = await loop.run_in_executor(None, lambda: auth._get_password_hash(user_id))
+    if password_hash is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
+    # Verify off the event loop so concurrent logins don't serialise.
+    ok = await verify_password_async(payload.password, password_hash)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
+    await loop.run_in_executor(None, lambda: auth._update_last_login(user_id))
     token = _make_token(user_id)
     return LoginResponse(
         token=token,

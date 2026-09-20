@@ -32,4 +32,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=900s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
 
-CMD ["uv", "run", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# 4 workers: one per CPU core available on the dev machine.
+# In production this would be set by the orchestration layer.
+CMD ["uv", "run", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

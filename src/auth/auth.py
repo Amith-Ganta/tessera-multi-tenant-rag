@@ -90,6 +90,52 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
+def _create_user_with_hash(email: str, password_hash: str) -> tuple[bool, str]:
+    """Insert a pre-hashed password for an email that is already validated and lowercased."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO users (email, password_hash) VALUES (?, ?)",
+            (email, password_hash),
+        )
+        conn.commit()
+        return True, "User created."
+    except sqlite3.IntegrityError:
+        return False, "User already exists."
+    except sqlite3.Error:
+        return False, "Database error."
+    finally:
+        conn.close()
+
+
+def _get_password_hash(user_id: int) -> str | None:
+    """Return the stored password_hash for a user id, or None if not found."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        c = conn.cursor()
+        c.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,))
+        row = c.fetchone()
+        return row[0] if row else None
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
+def _update_last_login(user_id: int) -> None:
+    """Stamp last_login for a user after successful authentication."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        c = conn.cursor()
+        c.execute("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
+        conn.commit()
+    except sqlite3.Error:
+        pass
+    finally:
+        conn.close()
+
+
 def user_exists(email: str) -> bool:
     if not email:
         return False
