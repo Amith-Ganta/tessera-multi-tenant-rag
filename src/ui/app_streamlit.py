@@ -498,7 +498,7 @@ with st.sidebar:
         st.markdown("""
         **Models:**
         - Embeddings: text-embedding-3-small
-        - Generation: deepseek-chat
+        - Generation: deepseek-flash
         - Reranking: ms-marco-MiniLM-L-6-v2
 
         **Retrieval Methods:**
@@ -507,7 +507,7 @@ with st.sidebar:
         - Direct: No retrieval
 
         **Pricing:**
-        - DeepSeek: $0.27 per 1M tokens
+        - DeepSeek: $0.07 per 1M tokens
         - OpenAI Embedding: $0.02 per 1M tokens
         """)
 
