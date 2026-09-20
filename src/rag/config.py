@@ -54,10 +54,18 @@ GOLDENS_PATH = PROJECT_ROOT / "goldens" / "retriever_goldens.json"
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 120
 
-# OpenAI provides embeddings; DeepSeek provides generation and the eval judge.
+# OpenAI provides embeddings; CHAT_MODEL selects the generation provider.
+# Override via CHAT_MODEL env var (e.g. set in docker-compose.yml).
 EMBEDDING_MODEL = "text-embedding-3-small"
-CHAT_MODEL = "deepseek/deepseek-chat"
+CHAT_MODEL = os.environ.get("CHAT_MODEL", "deepseek/deepseek-chat")
 RETRIEVER_TOP_K = 5
+
+
+def get_chat_api_key() -> str:
+    """Return the API key appropriate for the active CHAT_MODEL."""
+    if CHAT_MODEL.startswith("deepseek"):
+        return get_deepseek_api_key()
+    return get_openai_api_key()
 
 # Phase 2 Part A -- conditional re-ranking.
 # When the top-1 retrieved chunk is already a very strong match, the cross-encoder

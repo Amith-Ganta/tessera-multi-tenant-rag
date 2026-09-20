@@ -7,7 +7,7 @@ import os
 
 from litellm import completion
 
-from .config import CHAT_MODEL, get_deepseek_api_key
+from .config import CHAT_MODEL, get_chat_api_key
 
 
 def generate_answer(question: str, contexts: list) -> str:
@@ -28,7 +28,7 @@ def generate_answer(question: str, contexts: list) -> str:
     response = completion(
         model=CHAT_MODEL,
         messages=messages,
-        api_key=get_deepseek_api_key(),
+        api_key=get_chat_api_key(),
         temperature=0,
     )
     return response.choices[0].message.content or ""

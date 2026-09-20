@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from litellm import completion
 from langchain_core.documents import Document
 
-from .config import CHAT_MODEL, RETRIEVER_TOP_K, get_deepseek_api_key, get_tavily_api_key
+from .config import CHAT_MODEL, RETRIEVER_TOP_K, get_chat_api_key, get_tavily_api_key
 
 
 @dataclass(frozen=True)
@@ -119,7 +119,7 @@ def _classify_once(question: str) -> dict[str, Any]:
     response = completion(
         model=CHAT_MODEL,
         messages=messages,
-        api_key=get_deepseek_api_key(),
+        api_key=get_chat_api_key(),
         temperature=0,
         response_format={"type": "json_object"},
     )

@@ -17,6 +17,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - JUDGE_QUEUE_ENABLED=true
       - RATE_LIMIT_PER_MINUTE=100
+      - CHAT_MODEL=gpt-4o-mini
     env_file:
       - .env
     depends_on:

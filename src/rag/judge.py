@@ -5,7 +5,7 @@ from __future__ import annotations
 from deepeval.models import DeepEvalBaseLLM
 from litellm import completion
 
-from .config import CHAT_MODEL, get_deepseek_api_key
+from .config import CHAT_MODEL, get_chat_api_key
 
 
 class DeepSeekJudge(DeepEvalBaseLLM):
@@ -18,7 +18,7 @@ class DeepSeekJudge(DeepEvalBaseLLM):
         response = completion(
             model=CHAT_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            api_key=get_deepseek_api_key(),
+            api_key=get_chat_api_key(),
             temperature=0,
         )
         return response.choices[0].message.content or ""

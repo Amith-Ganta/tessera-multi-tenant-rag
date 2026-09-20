@@ -9,7 +9,7 @@ from typing import Any
 from litellm import completion
 from langchain_core.documents import Document
 
-from .config import CHAT_MODEL, RETRIEVER_TOP_K, get_deepseek_api_key
+from .config import CHAT_MODEL, RETRIEVER_TOP_K, get_chat_api_key
 from .reranker import rerank
 from .retriever_hybrid import retrieve_hybrid
 from .router import route_query, tavily_search
@@ -67,7 +67,7 @@ def _generate(question: str, contexts: list[Document], feedback: str | None = No
     response = completion(
         model=CHAT_MODEL,
         messages=messages,
-        api_key=get_deepseek_api_key(),
+        api_key=get_chat_api_key(),
         temperature=0,
     )
     return response.choices[0].message.content or "", _usage_dict(response)
@@ -88,7 +88,7 @@ def _self_check(question: str, answer: str, contexts: list[Document]) -> tuple[d
     response = completion(
         model=CHAT_MODEL,
         messages=messages,
-        api_key=get_deepseek_api_key(),
+        api_key=get_chat_api_key(),
         temperature=0,
         response_format={"type": "json_object"},
     )
