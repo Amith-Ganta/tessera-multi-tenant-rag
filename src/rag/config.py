@@ -121,3 +121,9 @@ JUDGE_POOL_SIZE = 3
 # Phase 5 — Redis checkpointer (Pattern 6: Statelessness).
 CHECKPOINTER_BACKEND = os.environ.get("CHECKPOINTER_BACKEND", "sqlite")  # "sqlite" | "redis"
 CHECKPOINTER_TTL_SECONDS = 86400  # 24 hours
+
+# Phase 8 — Canary deployment (ADR-011).
+# Requests are hashed by tenant_id; if hash % 100 < MODEL_CANARY_PERCENT,
+# the canary model version is used instead of the default. Set to 0 to disable.
+MODEL_CANARY_PERCENT = int(os.environ.get("MODEL_CANARY_PERCENT", "0"))
+MODEL_CANARY_VERSION = os.environ.get("MODEL_CANARY_VERSION", "gpt-4o-2024-11-20")
