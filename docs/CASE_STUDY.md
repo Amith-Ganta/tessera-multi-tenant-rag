@@ -202,3 +202,32 @@ optimisation. Per-stage measurement turned an invisible 3.7-second defect
 into a four-millisecond fix. The same discipline applies to any agentic
 system: instrument before tuning, measure against a baseline, document
 what was not measured.
+
+---
+
+## 6. Security Audit — Phase 2 Fixes
+
+A targeted security review found and fixed ten vulnerabilities. All changes
+are covered by regression tests (53 tests pass).
+
+**Critical fixes:**
+
+| ID | Finding | Fix |
+|----|---------|-----|
+| SEC-01 | Token expiry not enforced — tokens were valid indefinitely | `_verify_token` now checks `time.time() - issued_at > TOKEN_MAX_AGE_SECONDS` |
+| SEC-02 | `/budget` endpoint unauthenticated | Added `Depends(get_current_user)` |
+| SEC-03 | Rate limiter singleton recreated per request | Moved `_rate_limiter` to module level |
+| SEC-04 | Rate limiter INCR/EXPIRE race condition | Replaced two separate calls with atomic Redis pipeline |
+| SEC-05 | Semantic cache key missing tenant ID — cross-tenant leak | `make_key()` now prepends tenant as first element |
+| SEC-06 | Circuit breaker docstring falsely claimed Redis-backed shared state | Corrected: state is in-process only, independent per replica |
+| SEC-07 | `deepseek-chat` used as default despite cost 7× higher | Changed default to `deepseek-flash` across all three config locations |
+| SEC-08 | Judge queue had no retry limit or dead-letter queue | Added `MAX_JOB_ATTEMPTS=3`, `requeue_or_dlq()`, DLQ with envelope metadata |
+
+**Test coverage added:**
+
+- `TestSemanticCacheTenantIsolation` (4 tests): tenant A cache key never matches tenant B
+- `TestTokenExpiry` (7 tests): expiry enforced, tamper-resistant, boundary-exact
+- `TestDLQ` (3 tests): retry counter, DLQ routing at exhaustion, depth measurement
+- `TestBlockingPop` additions (2 tests): `_attempts` incremented on first pop and on retry
+
+**Evidence:** `pytest tests/ -q` → 53 passed, 0 failures.

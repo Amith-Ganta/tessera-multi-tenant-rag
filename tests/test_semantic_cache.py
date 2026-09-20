@@ -88,3 +88,31 @@ class TestSemanticCacheGetSet:
     def test_empty_hit_rate_is_zero(self):
         cache = SemanticCache(ttl_seconds=60)
         assert cache.hit_rate() == 0.0
+
+
+class TestSemanticCacheTenantIsolation:
+    """Regression tests for CVE: cross-tenant cache data leak (tenant missing from key)."""
+
+    def test_different_tenants_different_keys(self):
+        k1 = SemanticCache.make_key("same query", ["chunk-1"], "model-x", tenant="tenant_a")
+        k2 = SemanticCache.make_key("same query", ["chunk-1"], "model-x", tenant="tenant_b")
+        assert k1 != k2, "tenants with identical queries must not share a cache key"
+
+    def test_same_tenant_same_key_stable(self):
+        k1 = SemanticCache.make_key("q", ["c"], "m", tenant="t1")
+        k2 = SemanticCache.make_key("q", ["c"], "m", tenant="t1")
+        assert k1 == k2
+
+    def test_tenant_isolation_in_get_set(self):
+        cache = SemanticCache(ttl_seconds=60)
+        k_a = SemanticCache.make_key("q", ["c"], "m", tenant="alice")
+        k_b = SemanticCache.make_key("q", ["c"], "m", tenant="bob")
+        cache.set(k_a, {"answer": "alice's answer"})
+        # bob must not receive alice's cached answer
+        assert cache.get(k_b) is None
+        assert cache.get(k_a) == {"answer": "alice's answer"}
+
+    def test_empty_tenant_differs_from_named_tenant(self):
+        k_named = SemanticCache.make_key("q", ["c"], "m", tenant="tenant_x")
+        k_empty = SemanticCache.make_key("q", ["c"], "m", tenant="")
+        assert k_named != k_empty

@@ -57,7 +57,7 @@ CHUNK_OVERLAP = 120
 # OpenAI provides embeddings; CHAT_MODEL selects the generation provider.
 # Override via CHAT_MODEL env var (e.g. set in docker-compose.yml).
 EMBEDDING_MODEL = "text-embedding-3-small"
-CHAT_MODEL = os.environ.get("CHAT_MODEL", "deepseek/deepseek-chat")
+CHAT_MODEL = os.environ.get("CHAT_MODEL", "deepseek/deepseek-flash")
 RETRIEVER_TOP_K = 5
 
 

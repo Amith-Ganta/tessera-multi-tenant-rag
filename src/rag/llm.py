@@ -56,6 +56,7 @@ def _select_model(default_model: str) -> str:
 # These are estimates, not billed figures; the analytics log records them as such.
 _USD_PER_1M_TOKENS = {
     "deepseek/deepseek-chat": 0.27,
+    "deepseek/deepseek-flash": 0.07,
     "openai/gpt-4o-mini": 0.15,
     "openai/gpt-4o": 2.50,
 }
@@ -81,8 +82,8 @@ REQUEST_TIMEOUT_SECONDS = _env_num("TESSERA_REQUEST_TIMEOUT_SECONDS", 30, float)
 # silently continuing to bill. Set to 0 to disable the guard.
 DAILY_SPEND_USD_CAP = _env_num("TESSERA_DAILY_SPEND_USD_CAP", 5.0, float)
 
-# Fallback order by litellm id. DeepSeek is primary; OpenAI mini is the standby.
-_FALLBACK_CHAIN = ["deepseek/deepseek-chat", "openai/gpt-4o-mini"]
+# Fallback order by litellm id. DeepSeek flash is primary; OpenAI mini is the standby.
+_FALLBACK_CHAIN = ["deepseek/deepseek-flash", "openai/gpt-4o-mini"]
 
 
 @dataclass

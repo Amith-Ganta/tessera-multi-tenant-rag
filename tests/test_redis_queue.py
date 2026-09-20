@@ -10,7 +10,7 @@ import json
 import fakeredis
 import pytest
 
-from src.judge.redis_queue import JudgeQueue, _set_client
+from src.judge.redis_queue import JudgeQueue, _set_client, MAX_JOB_ATTEMPTS
 
 
 @pytest.fixture(autouse=True)
@@ -100,3 +100,58 @@ class TestBlockingPop:
         # timeout=1 to avoid BRPOP timeout=0 (which blocks forever in Redis)
         job = q.blocking_pop(timeout=1)
         assert job is None
+
+    def test_blocking_pop_increments_attempts(self, fake_redis_client):
+        q = make_queue()
+        q.publish("attempts-1", {"question": "q", "answer": "a", "contexts": []})
+        job = q.blocking_pop(timeout=1)
+        assert job is not None
+        assert job["_attempts"] == 1
+
+    def test_blocking_pop_increments_attempts_on_retry(self, fake_redis_client):
+        q = make_queue()
+        # Simulate a job that was already attempted once and re-queued
+        import json
+        job_data = json.dumps({"trace_id": "retry-1", "question": "q", "_attempts": 1})
+        fake_redis_client.lpush("test:queue", job_data)
+        job = q.blocking_pop(timeout=1)
+        assert job is not None
+        assert job["_attempts"] == 2
+
+
+class TestDLQ:
+    """Regression tests for DLQ and retry counter."""
+
+    def test_requeue_under_limit_goes_back_to_main_queue(self, fake_redis_client):
+        q = make_queue()
+        q.publish("dlq-1", {"question": "q", "answer": "a", "contexts": []})
+        job = q.blocking_pop(timeout=1)  # _attempts == 1
+        assert job["_attempts"] == 1
+        q.requeue_or_dlq(job)
+        # Should be back in the main queue
+        assert fake_redis_client.llen("test:queue") == 1
+        assert fake_redis_client.llen("test:queue:dlq") == 0
+
+    def test_requeue_at_max_attempts_goes_to_dlq(self, fake_redis_client):
+        q = make_queue()
+        import json
+        # Job has already hit MAX_JOB_ATTEMPTS - 1 attempts, blocking_pop will make it MAX
+        exhausted_data = json.dumps({
+            "trace_id": "dlq-exhaust",
+            "question": "q",
+            "_attempts": MAX_JOB_ATTEMPTS - 1,
+        })
+        fake_redis_client.lpush("test:queue", exhausted_data)
+        job = q.blocking_pop(timeout=1)
+        assert job["_attempts"] == MAX_JOB_ATTEMPTS
+        q.requeue_or_dlq(job)
+        assert fake_redis_client.llen("test:queue:dlq") == 1
+        assert fake_redis_client.llen("test:queue") == 0
+
+    def test_dlq_depth_reflects_items(self, fake_redis_client):
+        q = make_queue()
+        assert q.dlq_depth() == 0
+        import json
+        for i in range(3):
+            fake_redis_client.lpush("test:queue:dlq", json.dumps({"_raw": str(i)}))
+        assert q.dlq_depth() == 3

@@ -6,8 +6,10 @@ State transitions:
   HALF_OPEN → CLOSED    on the next success
   HALF_OPEN → OPEN      on the next failure
 
-Thread-safe via threading.Lock.  Backed by Redis so state is shared across
-API replicas; falls back to in-process state if Redis is unavailable.
+Thread-safe via threading.Lock.  State is in-process only — it is NOT shared
+across API replicas.  Each replica maintains its own independent breaker state.
+In a multi-replica deployment, a provider outage will open breakers
+independently as each replica accumulates failures.
 """
 
 from __future__ import annotations

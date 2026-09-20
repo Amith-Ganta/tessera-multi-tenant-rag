@@ -3,14 +3,15 @@ from __future__ import annotations
 import os
 
 MODEL_REGISTRY: dict[str, dict[str, str]] = {
+    "deepseek-flash": {"litellm_id": "deepseek/deepseek-flash", "provider": "deepseek"},
     "deepseek-chat": {"litellm_id": "deepseek/deepseek-chat", "provider": "deepseek"},
     "gpt-4o-mini": {"litellm_id": "openai/gpt-4o-mini", "provider": "openai"},
     "gpt-4o": {"litellm_id": "openai/gpt-4o", "provider": "openai"},
 }
 
 # CHAT_MODEL env var may be set to a registry short-name (e.g. "gpt-4o-mini").
-_env_model = os.environ.get("CHAT_MODEL", "deepseek-chat")
-DEFAULT_MODEL = _env_model if _env_model in MODEL_REGISTRY else "deepseek-chat"
+_env_model = os.environ.get("CHAT_MODEL", "deepseek-flash")
+DEFAULT_MODEL = _env_model if _env_model in MODEL_REGISTRY else "deepseek-flash"
 ALLOWED_MODELS: list[str] = list(MODEL_REGISTRY.keys())
 
 

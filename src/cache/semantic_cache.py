@@ -38,8 +38,9 @@ class SemanticCache:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def make_key(query: str, chunk_ids: list[str], model_name: str) -> str:
-        raw = query + "|" + "|".join(sorted(chunk_ids)) + "|" + model_name
+    def make_key(query: str, chunk_ids: list[str], model_name: str, tenant: str = "") -> str:
+        # tenant MUST be first so different tenants never share a cache slot.
+        raw = tenant + "|" + query + "|" + "|".join(sorted(chunk_ids)) + "|" + model_name
         return hashlib.sha256(raw.encode()).hexdigest()
 
     def get(self, key: str) -> dict[str, Any] | None:

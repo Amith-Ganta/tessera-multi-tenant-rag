@@ -25,6 +25,9 @@ from src.judge.judge_store import judge_store
 from src.judge.async_runner import submit_judge
 from src.cache.semantic_cache import semantic_cache, SemanticCache
 from src.security.async_crypto import hash_password_async, verify_password_async
+from src.resilience.rate_limiter import RateLimiter, RateLimitError as _RateLimitError
+from src.resilience.bulkhead import BulkheadFullError as _BulkheadFullError
+from src.resilience.circuit_breaker import CircuitOpenError as _CircuitOpenError
 
 try:
     from observability import latency_store, ALL_STAGES
@@ -68,12 +71,18 @@ def _make_token(user_id: int) -> str:
     return f"{payload}:{sig}"
 
 
+_TOKEN_MAX_AGE_SECONDS = int(os.environ.get("TESSERA_TOKEN_MAX_AGE_SECONDS", "86400"))  # 24 h default
+
+
 def _verify_token(token: str) -> int | None:
     try:
         payload, sig = token.rsplit(":", 1)
-        user_id_str, _issued_ts = payload.split(":", 1)
+        user_id_str, issued_ts_str = payload.split(":", 1)
         expected_sig = hmac.new(SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected_sig, sig):
+            return None
+        issued_ts = int(issued_ts_str)
+        if time.time() - issued_ts > _TOKEN_MAX_AGE_SECONDS:
             return None
         return int(user_id_str)
     except (ValueError, TypeError, AttributeError):
@@ -163,6 +172,9 @@ class AskResponse(BaseModel):
     transcript: list[dict] | None = None
 
 
+# Module-level singleton: one Redis connection pool shared across all requests.
+_rate_limiter = RateLimiter()
+
 app = FastAPI(title="Tessera Multi-Tenant RAG API")
 
 
@@ -199,7 +211,7 @@ def config() -> dict:
 
 
 @app.get("/budget")
-def budget() -> dict:
+def budget(user: tuple[int, str] = Depends(get_current_user)) -> dict:
     from src.rag.llm import MAX_OUTPUT_TOKENS, DAILY_SPEND_USD_CAP, spend_so_far
 
     spent = spend_so_far()
@@ -424,18 +436,15 @@ async def ask(
 
     # Phase 5: per-tenant rate limit for /ask.
     try:
-        from src.resilience.rate_limiter import RateLimiter, RateLimitError as _RLError
-        _rl = RateLimiter()
-        _rl.check(tenant)
+        _rate_limiter.check(tenant)
+    except _RateLimitError as _rl_exc:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={"error": "rate limit exceeded", "detail": str(_rl_exc)},
+            headers={"Retry-After": "60"},
+        )
     except Exception as _rl_exc:
-        _rl_name = type(_rl_exc).__name__
-        if _rl_name == "RateLimitError":
-            from fastapi.responses import JSONResponse
-            return JSONResponse(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                content={"error": "rate limit exceeded", "detail": str(_rl_exc)},
-                headers={"Retry-After": "60"},
-            )
         # Redis down or other error — fail open, log and continue.
         import logging as _logging
         _logging.getLogger(__name__).warning("rate limiter error (fail-open): %s", _rl_exc)
@@ -594,7 +603,7 @@ async def ask(
                 import uuid as _uuid
                 _trace_id = str(_uuid.uuid4())
                 _chunk_ids = _r.get("sources", []) or []
-                _c_key = SemanticCache.make_key(payload.question, _chunk_ids, model) if CACHE_ENABLED else None
+                _c_key = SemanticCache.make_key(payload.question, _chunk_ids, model, tenant) if CACHE_ENABLED else None
                 _cache_pl = {
                     "answer": _r.get("answer", ""),
                     "route": _r.get("route", ""),
@@ -635,50 +644,63 @@ async def ask(
         return StreamingResponse(_sse_generator(), media_type="text/event-stream")
 
     start = time.perf_counter()
-    with trace_run(strategy, payload.question, tenant) as run_span:
-        with use_tenant(tenant):
-            # Async judge mode: fire-and-forget — generate the answer without
-            # blocking on evaluation; the judge runs in a background task and its
-            # result is available via GET /eval/{trace_id}. Sync mode preserves
-            # Phase 3 behaviour (blocks the request until all metrics complete).
-            if payload.run_eval and JUDGE_MODE == "async":
-                result = run_strategy(
-                    strategy, payload.question, top_k=top_k, model=model, force_route=fr
-                )
-            elif payload.run_eval:
-                result = guarded_answer(
-                    strategy,
-                    payload.question,
-                    top_k=top_k,
-                    model=model,
-                    force_route=fr,
-                    run_strategy_fn=run_strategy,
-                    evaluate_fn=evaluate_answer,
-                    expected_output=payload.expected_output,
-                )
-            else:
-                result = run_strategy(
-                    strategy, payload.question, top_k=top_k, model=model, force_route=fr
-                )
+    try:
+        with trace_run(strategy, payload.question, tenant) as run_span:
+            with use_tenant(tenant):
+                # Async judge mode: fire-and-forget — generate the answer without
+                # blocking on evaluation; the judge runs in a background task and its
+                # result is available via GET /eval/{trace_id}. Sync mode preserves
+                # Phase 3 behaviour (blocks the request until all metrics complete).
+                if payload.run_eval and JUDGE_MODE == "async":
+                    result = run_strategy(
+                        strategy, payload.question, top_k=top_k, model=model, force_route=fr
+                    )
+                elif payload.run_eval:
+                    result = guarded_answer(
+                        strategy,
+                        payload.question,
+                        top_k=top_k,
+                        model=model,
+                        force_route=fr,
+                        run_strategy_fn=run_strategy,
+                        evaluate_fn=evaluate_answer,
+                        expected_output=payload.expected_output,
+                    )
+                else:
+                    result = run_strategy(
+                        strategy, payload.question, top_k=top_k, model=model, force_route=fr
+                    )
 
-            # Phase 4b: compute cache key from the real chunk IDs returned by
-            # this retrieval pass and check if we already have a cached answer.
-            # A hit replaces the result dict so we skip the LLM cost on the
-            # next identical request. Cache is populated only AFTER a successful
-            # judge run (write happens below for sync; async_runner writes for
-            # async). Never cache run_eval=True async results (eval is pending).
-            if CACHE_ENABLED:
-                _chunk_ids = result.get("sources", []) or []
-                _cache_key = SemanticCache.make_key(payload.question, _chunk_ids, model)
-                cached = semantic_cache.get(_cache_key)
-                if cached is not None:
-                    result = cached
+                # Phase 4b: compute cache key from the real chunk IDs returned by
+                # this retrieval pass and check if we already have a cached answer.
+                # A hit replaces the result dict so we skip the LLM cost on the
+                # next identical request. Cache is populated only AFTER a successful
+                # judge run (write happens below for sync; async_runner writes for
+                # async). Never cache run_eval=True async results (eval is pending).
+                if CACHE_ENABLED:
+                    _chunk_ids = result.get("sources", []) or []
+                    _cache_key = SemanticCache.make_key(payload.question, _chunk_ids, model, tenant)
+                    cached = semantic_cache.get(_cache_key)
+                    if cached is not None:
+                        result = cached
 
-        latency_ms = (time.perf_counter() - start) * 1000
-        run_span.finish(
-            route=result.get("route", ""),
-            answer=result.get("answer", ""),
-            latency_ms=latency_ms,
+            latency_ms = (time.perf_counter() - start) * 1000
+            run_span.finish(
+                route=result.get("route", ""),
+                answer=result.get("answer", ""),
+                latency_ms=latency_ms,
+            )
+    except _BulkheadFullError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="server at capacity, retry shortly",
+            headers={"Retry-After": "5"},
+        )
+    except _CircuitOpenError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM provider circuit open, retry shortly",
+            headers={"Retry-After": "30"},
         )
 
     usage = result.get("usage") or {"prompt": 0, "completion": 0, "total": 0}

@@ -13,5 +13,6 @@
 | [ADR-009](ADR-009.md) | Redis Checkpointer for Stateless A2A Agents | Accepted |
 | [ADR-010](ADR-010.md) | Autoscaling Strategy: HPA on Queue Depth for Judge Workers | Accepted |
 | [ADR-011](ADR-011.md) | Canary deployment for model version changes | Accepted |
+| [ADR-012](ADR-012.md) | LLM Deployment Governance | Accepted |
 
 ADRs follow the [Nygard format](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions): Context, Decision, Alternatives Considered, Consequences.

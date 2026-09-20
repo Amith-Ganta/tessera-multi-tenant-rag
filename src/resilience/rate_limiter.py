@@ -1,9 +1,10 @@
-"""Sliding-window rate limiter backed by Redis INCR/EXPIRE.
+"""Fixed-window rate limiter backed by Redis INCR/EXPIRE.
 
 Uses a fixed-window approximation: one Redis key per (identifier, minute).
-The key is created with INCR and given a 60 s TTL on the first increment of
-each window; subsequent increments within the window raise RateLimitError
-when the count exceeds the configured limit.
+The INCR and EXPIRE are issued as a pipeline to eliminate the race condition
+where a key could expire between INCR and EXPIRE, causing the TTL to never
+be set.  EXPIRE is always sent; the cost is one extra round-trip per first
+request per window, which is negligible.
 
 Degrades gracefully: if Redis is unreachable, all requests pass through
 (fail-open) and a warning is logged.
@@ -66,9 +67,10 @@ class RateLimiter:
         window = int(time.time() // 60)
         key = f"{self._prefix}{identifier}:{window}"
         try:
-            count = client.incr(key)
-            if count == 1:
-                client.expire(key, 60)
+            pipe = client.pipeline()
+            pipe.incr(key)
+            pipe.expire(key, 60)
+            count, _ = pipe.execute()
             if count > self._limit:
                 raise RateLimitError(identifier, self._limit, count)
             return count

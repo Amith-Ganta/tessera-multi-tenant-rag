@@ -4,6 +4,21 @@ Replaces the in-process asyncio.create_task approach with a durable queue so
 that judge jobs survive API process restarts, are bounded in concurrency, and
 can be consumed by a separate judge_worker.py process.
 
+Reliability model:
+  - At-most-once semantics: BRPOP removes the job from the queue before
+    processing; if the worker crashes mid-job, the job is lost.  This is
+    intentional for the judge queue — a missing eval is recoverable (the
+    result is marked "pending" indefinitely), whereas at-least-once delivery
+    would require idempotency guarantees on the judge itself.
+  - Retry counter: each job carries a ``_attempts`` field.  The worker
+    increments it before processing and re-queues on failure (up to
+    MAX_JOB_ATTEMPTS).  Jobs that exceed the retry limit are pushed to the
+    DLQ (``<queue_name>:dlq``) so they can be inspected without blocking
+    the main queue.
+  - DLQ: ``judge:queue:dlq`` receives jobs that exhausted all retries, plus
+    malformed payloads.  The DLQ is not consumed automatically; an operator
+    drains it manually via the ``/admin/dlq`` endpoint or Redis CLI.
+
 All values are JSON-serialised before LPUSH / SET and deserialised on read.
 The Redis client is thread-safe; a single module-level client is shared across
 all callers in the same process.  Connectivity failures degrade gracefully:
@@ -16,6 +31,8 @@ import logging
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+MAX_JOB_ATTEMPTS = 3
 
 _redis_client = None
 
@@ -62,6 +79,7 @@ class JudgeQueue:
                  max_depth: int | None = None) -> None:
         from src.rag.config import JUDGE_QUEUE_NAME, JUDGE_RESULTS_PREFIX, JUDGE_QUEUE_MAX_DEPTH
         self._queue = queue_name or JUDGE_QUEUE_NAME
+        self._dlq = self._queue + ":dlq"
         self._prefix = results_prefix or JUDGE_RESULTS_PREFIX
         self._max_depth = max_depth if max_depth is not None else JUDGE_QUEUE_MAX_DEPTH
 
@@ -125,7 +143,12 @@ class JudgeQueue:
     # ── worker-side pop ───────────────────────────────────────────────────────
 
     def blocking_pop(self, timeout: int = 5) -> dict | None:
-        """BRPOP with timeout; returns deserialised job dict or None on timeout."""
+        """BRPOP with timeout; returns deserialised job dict or None on timeout.
+
+        Increments the ``_attempts`` counter on the job before returning it so
+        the worker knows how many times it has been tried.  Malformed payloads
+        are pushed to the DLQ immediately rather than being dropped silently.
+        """
         client = _get_client()
         if client is None:
             return None
@@ -134,13 +157,61 @@ class JudgeQueue:
             if result is None:
                 return None
             _key, raw = result
-            return json.loads(raw)
+            job = json.loads(raw)
+            job["_attempts"] = int(job.get("_attempts", 0)) + 1
+            return job
         except json.JSONDecodeError as exc:
-            logger.error("malformed JSON in queue: %s", exc)
+            logger.error("malformed JSON in queue — moving to DLQ: %s", exc)
+            self._push_to_dlq(raw, reason=str(exc))
             return None
         except Exception as exc:
             logger.error("blocking_pop error: %s", exc)
             return None
+
+    def requeue_or_dlq(self, job: dict[str, Any]) -> None:
+        """Re-queue a failed job up to MAX_JOB_ATTEMPTS; route to DLQ thereafter.
+
+        Call this from the worker when a job raises an exception.  The job's
+        ``_attempts`` counter must already have been incremented by blocking_pop.
+        """
+        attempts = int(job.get("_attempts", 1))
+        if attempts < MAX_JOB_ATTEMPTS:
+            client = _get_client()
+            if client is not None:
+                try:
+                    client.lpush(self._queue, json.dumps(job))
+                    logger.warning(
+                        "judge job %s re-queued (attempt %d/%d)",
+                        job.get("trace_id"), attempts, MAX_JOB_ATTEMPTS,
+                    )
+                    return
+                except Exception as exc:
+                    logger.error("requeue failed for trace_id=%s: %s", job.get("trace_id"), exc)
+        self._push_to_dlq(json.dumps(job), reason=f"exhausted {attempts} attempts")
+
+    def _push_to_dlq(self, raw: str, *, reason: str) -> None:
+        """Push a raw job string to the DLQ with an added failure reason."""
+        client = _get_client()
+        if client is None:
+            logger.error("DLQ push skipped — Redis unavailable; reason: %s", reason)
+            return
+        try:
+            import time as _time
+            envelope = json.dumps({"_dlq_reason": reason, "_dlq_ts": _time.time(), "_raw": raw})
+            client.lpush(self._dlq, envelope)
+            logger.error("job pushed to DLQ (%s); reason: %s", self._dlq, reason)
+        except Exception as exc:
+            logger.error("DLQ push failed: %s", exc)
+
+    def dlq_depth(self) -> int:
+        """Return the current DLQ depth; 0 if Redis is unreachable."""
+        client = _get_client()
+        if client is None:
+            return 0
+        try:
+            return int(client.llen(self._dlq))
+        except Exception:
+            return 0
 
 
 # Module-level singleton used by the FastAPI app and the worker
