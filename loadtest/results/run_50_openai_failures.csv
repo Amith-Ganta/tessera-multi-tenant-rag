@@ -1,0 +1,4 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+POST,/ask,"ReadTimeout(ReadTimeoutError(""HTTPConnectionPool(host='127.0.0.1', port=8000): Read timed out. (read timeout=120)""))",50,2026-09-20T01:32:00Z,2026-09-20T01:32:19Z
+POST,/ask,RemoteDisconnected('Remote end closed connection without response'),2,2026-09-20T01:29:32Z,2026-09-20T01:30:00Z
+POST,/auth/signup,HTTPError('400 Client Error: Bad Request for url: /auth/signup'),49,2026-09-20T01:28:47Z,2026-09-20T01:29:01Z
