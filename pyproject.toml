@@ -45,6 +45,7 @@ torch = { index = "pytorch-cpu" }
 [dependency-groups]
 dev = [
     "deepeval>=4.2.0",
+    "fakeredis>=2.38.0",
     "locust>=2.46.6",
     "pytest>=9.1.1",
 ]
