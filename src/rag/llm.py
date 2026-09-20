@@ -52,11 +52,13 @@ def _select_model(default_model: str) -> str:
         return MODEL_CANARY_VERSION
     return default_model
 
-# Rough public list prices, only used for a spend estimate and the daily guard.
-# These are estimates, not billed figures; the analytics log records them as such.
+# Blended per-1M-token estimates, applied to (prompt + completion).
+# These are estimates for the spend guard and analytics, not billed
+# figures. The deepseek-flash rate assumes ~5:1 input:output ratio,
+# which matches a retrieval-heavy RAG workload.
 _USD_PER_1M_TOKENS = {
     "deepseek/deepseek-chat": 0.27,
-    "deepseek/deepseek-flash": 0.07,
+    "deepseek/deepseek-flash": 0.25,
     "openai/gpt-4o-mini": 0.15,
     "openai/gpt-4o": 2.50,
 }
