@@ -89,9 +89,10 @@ faithfulness, context precision, and context recall.
 **Correctness definition.** Correct means the cited paragraph actually
 supports the answer. Not string equality. A grounded claim.
 
-**Unit coverage.** 104 tests covering the request path, pattern wiring
+**Unit coverage.** 129 tests covering the request path, pattern wiring
 (circuit breaker, bulkhead, rate limiter, checkpointer, queue),
 conditional refinement, semantic cache, streaming, and observability.
+The count is verified by running the full suite with `uv run python -m pytest tests/ -q`; partial runs or runs outside the `uv` environment will report fewer tests and are not the authoritative count.
 
 **Measured results (Phase 3 — 20 queries, `run_eval=False`):**
 
@@ -208,7 +209,7 @@ what was not measured.
 ## 6. Security Audit — Phase 2 Fixes
 
 A targeted security review found and fixed ten vulnerabilities. All changes
-are covered by regression tests (53 tests pass).
+are covered by regression tests (129 tests pass in the full suite).
 
 **Critical fixes:**
 
@@ -230,4 +231,4 @@ are covered by regression tests (53 tests pass).
 - `TestDLQ` (3 tests): retry counter, DLQ routing at exhaustion, depth measurement
 - `TestBlockingPop` additions (2 tests): `_attempts` incremented on first pop and on retry
 
-**Evidence:** `pytest tests/ -q` → 53 passed, 0 failures.
+**Evidence:** `uv run python -m pytest tests/ -q` → 129 passed, 0 failures.
