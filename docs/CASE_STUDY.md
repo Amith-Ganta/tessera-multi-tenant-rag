@@ -294,3 +294,109 @@ the limitation for operators. Upgrade path to Option A is described in the ADR.
 | MM-01 embedding resilience | 6 |
 | MM-02 queue publish honesty | 6 |
 | **Total** | **152** |
+
+---
+
+## Phase 9 — Data Lifecycle and Deletion Propagation (GAP-01, 02, 03, 04, 07, 09)
+
+A systematic audit of data storage and deletion paths (`docs/DATA_LIFECYCLE.md`) identified
+ten lifecycle gaps across the six storage subsystems (disk, Chroma, semantic cache, Redis
+judge results, checkpoints, user DB). Six gaps were closed in this phase.
+
+### GAP-01 + GAP-02 — DELETE /documents/{filename}
+
+**Problem:** No endpoint existed to delete a single document. Tenants could not remove
+uploaded files without re-uploading the entire corpus.
+
+**Fix:**
+- `DELETE /documents/{filename}` endpoint in `src/api/app.py` with:
+  - Path traversal validation: rejects `..`, `/`, `\`, null bytes, leading `.` → HTTP 400
+  - File existence check → HTTP 404 if not found
+  - `target.unlink()` removes the file from the tenant corpus directory
+  - `SemanticCache.invalidate_by_document(tenant, filename)` (GAP-02 closed)
+  - `JudgeQueue.invalidate_judge_results_for_document(tenant, filename)` (GAP-03 closed)
+  - Full `build_tenant_index(tenant)` rebuild from remaining corpus files
+- `SemanticCache.invalidate_by_document()` added to `src/cache/semantic_cache.py`
+
+**Tests added:** `tests/test_document_delete.py` — 7 tests covering traversal rejection
+(6 parametrized bad names), null byte handling, 404 on missing file, 204 + file removal,
+index rebuild, cache eviction, and idempotent second delete.
+
+### GAP-09 — Tenant-Scoped Judge Result Keys
+
+**Problem:** Redis judge result keys had no tenant component (`judge:result:<trace_id>`),
+making tenant-level enumeration and purge impossible without a full scan.
+
+**Fix:**
+- Redis keys are now `judge:result:<tenant>:<trace_id>` in `src/judge/redis_queue.py`
+- `GET /eval/{trace_id}` derives tenant from the authenticated user and calls
+  `judge_queue.get_result(trace_id, tenant=tenant)` — prevents cross-tenant result reads
+- `invalidate_by_tenant(tenant)` and `invalidate_judge_results_for_document(tenant, filename)`
+  added to `JudgeQueue`
+
+**Tests added:** `tests/test_redis_queue.py` — 6 new tests in `TestTenantScopedResults`.
+
+### GAP-03 — Judge Result Invalidation on Document Deletion
+
+**Problem:** Deleting a document left orphaned judge results in Redis until TTL expiry.
+Results referencing deleted content could still be returned via `GET /eval/{trace_id}`.
+
+**Fix:** `JudgeQueue.invalidate_judge_results_for_document(tenant, filename)` SCAN-filters
+Redis keys for `judge:result:<tenant>:*`, loads each result JSON, checks the `contexts`/
+`sources` field for source paths matching the deleted filename, and deletes matches.
+
+### GAP-04 + GAP-07 — DELETE /tenant (Full GDPR-Compliant Removal)
+
+**Problem:** No API endpoint for full tenant data removal. Deleting a tenant required
+manual filesystem and database operations across six subsystems. Conversation checkpoints
+were not included in any deletion path (GAP-07).
+
+**Fix:**
+- `DELETE /tenant` in `src/api/app.py` removes in order:
+  1. Raw documents: `shutil.rmtree(corpus_dir)`
+  2. Chroma vector index: `shutil.rmtree(index_dir)`
+  3. Semantic cache: `SemanticCache.invalidate_by_tenant(tenant)`
+  4. Judge results: `JudgeQueue.invalidate_by_tenant(tenant)` (when `JUDGE_QUEUE_ENABLED`)
+  5. SQLite checkpoints: `SQLiteCheckpointer().delete_tenant_checkpoints(tenant)` using
+     `json_extract(state_json, '$.tenant_slug') = ?` (GAP-07 closed)
+  6. Redis checkpoints: `RedisCheckpointer().delete_tenant_checkpoints(tenant)` using
+     SCAN + JSON body filter (GAP-07 closed)
+  7. User row: `auth.delete_user(user_id)`
+- `delete_user(user_id)` added to `src/auth/auth.py`
+- `delete_tenant_checkpoints(tenant)` added to both `SQLiteCheckpointer`
+  (`src/rag/checkpointer.py`) and `RedisCheckpointer` (`src/state/redis_checkpointer.py`)
+- Endpoint is idempotent: `rmtree(ignore_errors=True)`, all cleanup functions safe on empty input
+
+**Tests added:** `tests/test_tenant_delete.py` — 5 tests: corpus + index removal, SQLite
+checkpoint deletion (isolated from other tenants), Redis checkpoint deletion (fakeredis),
+judge result deletion, and idempotent second call.
+
+### xfail → passing: test_deletion_consistency.py
+
+Two `@pytest.mark.xfail` tests in `tests/test_deletion_consistency.py` were converted to
+passing tests:
+
+- **Test 4** (`test_single_document_deletion_removes_it_from_index`): Now explicitly
+  removes the file and triggers a full rebuild, asserting the deleted document's source
+  path no longer appears in Chroma query results.
+- **Test 5** (`test_cache_invalidated_after_document_deletion`): Now seeds the
+  `SemanticCache` with source-tagged entries and calls `invalidate_by_document()` directly,
+  asserting eviction count = 1 and that an unrelated entry survives.
+
+### Deferred Gaps
+
+GAP-05 (analytics log unbounded growth), GAP-06 (DLQ accumulation), GAP-08 (per-document
+Chroma `delete()` — full rebuild is correct, per-doc delete is an optimisation), and
+GAP-10 (`clear_analytics()` not exposed via API) remain documented as future enhancements.
+
+### Updated Test Count
+
+| Stage | Tests |
+|---|---|
+| Pre-existing (Phases 1–8) | 152 |
+| GAP-01 document delete (+ traversal, cache, rebuild) | 7 |
+| GAP-04 tenant delete (+ checkpoints, judge results) | 5 |
+| GAP-09 tenant-scoped Redis results | 6 |
+| xfail converted to passing | 2 (already counted in prior phases) |
+| **Total** | **170** |
+

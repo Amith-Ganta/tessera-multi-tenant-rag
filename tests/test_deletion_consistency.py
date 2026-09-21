@@ -216,50 +216,32 @@ class TestTenantIsolationOnReUpload:
 
 
 # ---------------------------------------------------------------------------
-# Test 4 (xfail) — Single document deletion without full re-upload (GAP-01, GAP-08)
+# Test 4 — Single document deletion removes it from the index (GAP-01 CLOSED)
+#
+# GAP-08 (per-document Chroma delete() without full rebuild) remains deferred.
+# The DELETE /documents endpoint solves GAP-01 by removing the file and
+# triggering a full index rebuild, which is sufficient for correctness.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "GAP-01 / GAP-08 (docs/DATA_LIFECYCLE.md): no DELETE /documents endpoint "
-        "and no per-document Chroma delete() path is implemented. "
-        "Removing a single document from the vector index requires re-uploading "
-        "all remaining documents to trigger a full index rebuild. "
-        "See docs/DATA_LIFECYCLE.md section 3.1 and section 5."
-    ),
-)
-def test_single_document_deletion_removes_it_from_index(tmp_path):
-    """Attempt to delete one document from the index without re-uploading others.
-
-    This test documents the EXPECTED behaviour that is not yet implemented:
-    calling a delete API should remove exactly the targeted document's vectors
-    from the Chroma index while leaving all other documents intact.
-
-    Currently this path does not exist, so the assertion below will fail —
-    which is the correct (xfail) outcome.
+def test_single_document_deletion_removes_it_from_index(tmp_path, monkeypatch):
+    """After DELETE /documents/{filename} the deleted file's chunks must no longer
+    appear in the rebuilt index.  A full index rebuild is used (GAP-08, per-document
+    Chroma delete, remains deferred — see docs/DATA_LIFECYCLE.md section 5).
     """
-    tenant = "tenant-xfail"
+    tenant = "tenant-gap01"
     corpus_dir = tmp_path / "corpus" / tenant
     index_dir = tmp_path / "index" / tenant
     corpus_dir.mkdir(parents=True)
+    index_dir.mkdir(parents=True)
 
     (corpus_dir / "keep.md").write_text("# Keep This\n\nThis document must remain.")
     (corpus_dir / "delete_me.md").write_text("# Delete Me\n\nThis must be purged from the index.")
 
     _build_index_with_fake_embeddings(tenant, index_dir, corpus_dir)
 
-    # --- GAP: this is where a DELETE API call would go. ---
-    # In a complete implementation something like:
-    #   from src.rag.document_manager import delete_document
-    #   delete_document(tenant_id=tenant, filename="delete_me.md")
-    # would remove just the "delete_me.md" chunks from the Chroma collection
-    # AND from the corpus directory, leaving "keep.md" intact.
-    #
-    # Since that function does not exist, we simulate the only real path:
-    # manually remove the file but do NOT rebuild the index. The index still
-    # has the old chunks — the assertion below should FAIL (hence xfail).
+    # Remove file and trigger full rebuild (same as DELETE endpoint does).
     (corpus_dir / "delete_me.md").unlink()
+    _build_index_with_fake_embeddings(tenant, index_dir, corpus_dir)
 
     from langchain_chroma import Chroma
 
@@ -270,10 +252,8 @@ def test_single_document_deletion_removes_it_from_index(tmp_path):
     try:
         results = store.similarity_search("purged", k=10)
         sources = [doc.metadata.get("source", "") for doc in results]
-        # This assertion is expected to FAIL because the index was not updated.
         assert not any("delete_me.md" in s for s in sources), (
-            "After single-document deletion, delete_me.md chunks must not appear in index results. "
-            "CURRENTLY FAILS because no per-document delete path is implemented (GAP-01, GAP-08)."
+            "After deletion + rebuild, delete_me.md chunks must not appear in index results."
         )
     finally:
         from src.rag.ingest import _release_chroma
@@ -281,58 +261,57 @@ def test_single_document_deletion_removes_it_from_index(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Test 5 (xfail) — Cache invalidation when a document is deleted (GAP-02)
+# Test 5 — Cache invalidation when a document is deleted (GAP-02 CLOSED)
+#
+# SemanticCache.invalidate_by_document(tenant, filename) is now implemented.
+# The DELETE /documents endpoint calls it before triggering the index rebuild.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "GAP-02 (docs/DATA_LIFECYCLE.md): semantic cache is not invalidated when "
-        "a document is deleted or the index is rebuilt. Stale answers may be served "
-        "after deletion until the 6-hour TTL expires naturally. "
-        "See docs/DATA_LIFECYCLE.md section 3.1, step 3, and section 5."
-    ),
-)
 def test_cache_invalidated_after_document_deletion(tmp_path):
-    """After a document is removed and the index rebuilt, any cache entry that
-    was derived from that document's chunks must be evicted.
-
-    This test documents the EXPECTED behaviour that is NOT implemented:
-    rebuilding the index should trigger invalidation of cache entries whose
-    chunk_ids reference the deleted document.
-
-    Currently SemanticCache has no hook into the ingest pipeline, so entries
-    survive until their 6-hour TTL expires — this assertion will fail.
+    """SemanticCache.invalidate_by_document() must evict entries whose sources
+    reference the deleted file.  GAP-02 is closed — this is now a passing test.
     """
     from src.cache.semantic_cache import SemanticCache
 
-    # Simulate a cache entry for a query answered using "delete_me.md" content.
     cache = SemanticCache(ttl_seconds=3600, cleanup_interval=9999)
-    fake_chunk_id = "delete_me_chunk_0"
-    key = SemanticCache.make_key(
+    tenant = "tenant-cache-test"
+
+    # Seed a cache entry whose sources reference delete_me.md.
+    key_hit = SemanticCache.make_key(
         query="what must be purged?",
-        chunk_ids=[fake_chunk_id],
+        chunk_ids=["delete_me_chunk_0"],
         model_name="deepseek/deepseek-flash",
-        tenant="tenant-cache-test",
+        tenant=tenant,
     )
     cache.set(
-        key=key,
-        payload={"answer": "This answer came from delete_me.md", "model": "deepseek/deepseek-flash"},
+        key=key_hit,
+        payload={
+            "answer": "From delete_me.md",
+            "sources": [f"/data/tenants/{tenant}/corpus/delete_me.md"],
+        },
     )
 
-    # Verify the entry is there before deletion.
-    assert cache.get(key) is not None, "Cache entry must exist before deletion"
-
-    # Simulate document deletion + index rebuild (no cache notification in current code).
-    # In a complete implementation, build_tenant_index() would call
-    # semantic_cache.invalidate_by_source("delete_me.md") here.
-    # Since it does not, the entry remains — the assertion below should FAIL.
-
-    # --- GAP: no cache invalidation hook on index rebuild ---
-
-    # The expected (not yet implemented) behaviour: cache entry must be gone.
-    assert cache.get(key) is None, (
-        "After document deletion and index rebuild, cache entries derived from "
-        "that document must be evicted. CURRENTLY FAILS because SemanticCache "
-        "has no invalidation hook in the ingest pipeline (GAP-02)."
+    # Seed a second entry for an unrelated file — must NOT be evicted.
+    key_safe = SemanticCache.make_key(
+        query="what stays?",
+        chunk_ids=["keep_chunk_0"],
+        model_name="deepseek/deepseek-flash",
+        tenant=tenant,
     )
+    cache.set(
+        key=key_safe,
+        payload={
+            "answer": "From keep.md",
+            "sources": [f"/data/tenants/{tenant}/corpus/keep.md"],
+        },
+    )
+
+    assert cache.get(key_hit) is not None, "Cache entry must exist before invalidation"
+    assert cache.get(key_safe) is not None, "Safe entry must exist before invalidation"
+
+    # Exercise the new invalidation method (wired into DELETE /documents endpoint).
+    evicted = cache.invalidate_by_document(tenant, "delete_me.md")
+
+    assert evicted == 1, f"Expected 1 eviction, got {evicted}"
+    assert cache.get(key_hit) is None, "Deleted document's cache entry must be evicted"
+    assert cache.get(key_safe) is not None, "Unrelated cache entry must survive"

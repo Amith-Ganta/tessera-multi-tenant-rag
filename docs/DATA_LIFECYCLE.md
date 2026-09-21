@@ -9,17 +9,17 @@ Last updated: 2026-09-21
 
 | Data Type | System of Record | Derived From | Retention Policy | Deletion Semantics | Tenant Isolation |
 |---|---|---|---|---|---|
-| Raw document | Disk — `data/tenants/<slug>/corpus/` | User upload | Until re-upload wipes index; file persists separately | **NOT IMPLEMENTED** — no DELETE endpoint | Per-tenant directory |
+| Raw document | Disk — `data/tenants/<slug>/corpus/` | User upload | Until deleted via DELETE /documents or tenant deletion | `DELETE /documents/{filename}` or `DELETE /tenant` | Per-tenant directory |
 | Chunks | In-memory only (transient) | Raw document (splitting) | Discarded after ingestion; not persisted independently | N/A — never stored | N/A |
 | Embeddings | Chroma persist dir (SQLite) | Chunks + OpenAI embedding model | Until index directory is wiped | Wiped by `shutil.rmtree` on next upload | Per-tenant Chroma dir |
 | Vector index (Chroma) | Disk — `data/index/tenants/<slug>/chroma/` | Embeddings + chunk text + metadata | Rebuilt from scratch on every upload | `shutil.rmtree` before rebuild (`src/rag/ingest.py:112`) | Separate directory per tenant |
-| Semantic cache entries | In-process memory (`SemanticCache._store`) | LLM answer + judge result | TTL 21 600 s (6 h); background eviction every 5 min | `SemanticCache.clear()` — **NOT EXPOSED VIA API** | Key prefix includes tenant slug |
+| Semantic cache entries | In-process memory (`SemanticCache._store`) | LLM answer + judge result | TTL 21 600 s (6 h); background eviction every 5 min | `SemanticCache.invalidate_by_document()` on doc delete; `invalidate_by_tenant()` on tenant delete | Key prefix includes tenant slug |
 | Judge results (in-process) | `JudgeStore` ring buffer (OrderedDict) | Eval run output | Ring buffer max 5 000 entries; LRU eviction | No explicit deletion | `trace_id` scoped; no tenant field in key |
-| Judge results (Redis) | Redis — key `judge:result:<trace_id>` | Eval run output | TTL 86 400 s (24 h) | TTL expiry only; **no explicit delete API** | `trace_id` scoped; no tenant field in key |
+| Judge results (Redis) | Redis — key `judge:result:<tenant>:<trace_id>` | Eval run output | TTL 86 400 s (24 h) | `JudgeQueue.invalidate_by_tenant()` on tenant delete; `invalidate_judge_results_for_document()` on doc delete | Tenant-scoped key (GAP-09 closed) |
 | Judge queue jobs | Redis list — `judge:queue` | `/ask` request | Consumed on dequeue; no persistence after processing | Consumed by worker; DLQ entries persist indefinitely | No tenant isolation in queue |
 | Judge DLQ | Redis list — `judge:queue:dlq` | Failed queue jobs | **No TTL — persists indefinitely** | **NOT IMPLEMENTED** — no drain endpoint | No tenant isolation |
-| Conversation checkpoints (SQLite) | `data/checkpoints.sqlite3` — `checkpoints` table | A2A workflow state | Until explicit delete after workflow completion | `SQLiteCheckpointer.delete_state(thread_id)` — `src/rag/checkpointer.py:112` | `thread_id` scoped; tenant stored in JSON state |
-| Conversation checkpoints (Redis) | Redis — key `checkpoint:<thread_id>` | A2A workflow state | TTL 86 400 s (24 h) | `RedisCheckpointer.delete_state(thread_id)` — `src/state/redis_checkpointer.py:83` | `thread_id` scoped; tenant stored in JSON state |
+| Conversation checkpoints (SQLite) | `data/checkpoints.sqlite3` — `checkpoints` table | A2A workflow state | Until explicit delete after workflow completion | `SQLiteCheckpointer.delete_state(thread_id)` or `delete_tenant_checkpoints(tenant)` on tenant delete | `thread_id` scoped; tenant stored in JSON state |
+| Conversation checkpoints (Redis) | Redis — key `checkpoint:<thread_id>` | A2A workflow state | TTL 86 400 s (24 h) | `RedisCheckpointer.delete_state(thread_id)` or `delete_tenant_checkpoints(tenant)` on tenant delete | `thread_id` scoped; tenant stored in JSON state |
 | Analytics records | `logs/analytics.jsonl` (JSONL append-only) | Every `/ask` call | **No TTL — file grows unbounded** | `clear_analytics()` — **NOT EXPOSED VIA API** | `tenant` field present but file is shared |
 | User query log | `tessera_users.db` — `user_queries` table | Every `/ask` call | **No TTL — grows unbounded** | **NOT IMPLEMENTED** — no delete endpoint | `user_id` field present; shared database |
 | Langfuse / LangSmith traces | Remote (Langfuse / LangSmith cloud) | LLM calls and RAG runs | Governed by external service SLA | Via external provider UI only; **not implemented locally** | Remote project scoping |
@@ -114,40 +114,41 @@ achieve full deletion consistency:
 
 | Step | Artifact | Location | Implemented? |
 |---|---|---|---|
-| 1 | Raw document file | `data/tenants/<slug>/corpus/<filename>` | **NOT IMPLEMENTED** |
-| 2 | Vector index (embeddings + chunks for that document) | `data/index/tenants/<slug>/chroma/` | **PARTIAL** — full index wipe only (re-upload), no per-document removal |
-| 3 | Semantic cache entries that used this document's chunks | `SemanticCache._store` (in-memory) | **NOT IMPLEMENTED** — no per-document eviction |
-| 4 | Judge results that reference this document's chunks | Redis `judge:result:*` / `JudgeStore` | **NOT IMPLEMENTED** |
-| 5 | Analytics records mentioning this document | `logs/analytics.jsonl`, `user_queries` table | **NOT IMPLEMENTED** |
+| 1 | Raw document file | `data/tenants/<slug>/corpus/<filename>` | **IMPLEMENTED** — `DELETE /documents/{filename}` |
+| 2 | Vector index (embeddings + chunks for that document) | `data/index/tenants/<slug>/chroma/` | **IMPLEMENTED** — full index rebuild after delete (GAP-08 per-doc Chroma delete still deferred) |
+| 3 | Semantic cache entries that used this document's chunks | `SemanticCache._store` (in-memory) | **IMPLEMENTED** — `SemanticCache.invalidate_by_document()` (GAP-02 closed) |
+| 4 | Judge results that reference this document's chunks | Redis `judge:result:<tenant>:*` | **IMPLEMENTED** — `JudgeQueue.invalidate_judge_results_for_document()` (GAP-03 closed) |
+| 5 | Analytics records mentioning this document | `logs/analytics.jsonl`, `user_queries` table | **NOT IMPLEMENTED** (GAP-05, deferred) |
 
-**Current actual deletion path (on re-upload only):**
+**Actual deletion path via `DELETE /documents/{filename}`:**
 
 ```
-POST /upload (new document for same tenant)
+DELETE /documents/{filename}
     │
-    ├── Wipes entire Chroma index directory (shutil.rmtree)
-    │   src/rag/ingest.py:112-114
+    ├── Path traversal validation (400 on bad input)
     │
-    └── Does NOT touch:
-        - Old raw document file (new file is written alongside it)
-        - Semantic cache entries
-        - Judge results
-        - Analytics records
+    ├── File existence check (404 if not found)
+    │
+    ├── unlink() raw document from corpus dir
+    │
+    ├── SemanticCache.invalidate_by_document(tenant, filename)  ← GAP-02
+    │
+    ├── JudgeQueue.invalidate_judge_results_for_document(tenant, filename)  ← GAP-03
+    │
+    └── build_tenant_index(tenant)  — full Chroma rebuild from remaining corpus
 ```
-
-There is **no dedicated DELETE /documents endpoint** and **no DELETE /tenant endpoint**.
 
 ### 3.2 What Must Be Deleted When a Tenant Is Deleted
 
 | Artifact | Location | Implemented? |
 |---|---|---|
-| All raw documents | `data/tenants/<slug>/corpus/` | **NOT IMPLEMENTED** |
-| Vector index | `data/index/tenants/<slug>/chroma/` | **NOT IMPLEMENTED** |
-| Semantic cache entries (all for tenant) | `SemanticCache._store` | **NOT IMPLEMENTED** |
-| Judge results (all for tenant) | Redis `judge:result:*` / `JudgeStore` | **NOT IMPLEMENTED** — no tenant field in key |
-| Conversation checkpoints (all for tenant) | `data/checkpoints.sqlite3` / Redis `checkpoint:*` | **NOT IMPLEMENTED** — tenant is in JSON state body, not the key; no tenant-level query |
-| Analytics records | `logs/analytics.jsonl`, `user_queries` table | **NOT IMPLEMENTED** |
-| User account | `tessera_users.db:users` | **NOT IMPLEMENTED** |
+| All raw documents | `data/tenants/<slug>/corpus/` | **IMPLEMENTED** — `shutil.rmtree` in `DELETE /tenant` |
+| Vector index | `data/index/tenants/<slug>/chroma/` | **IMPLEMENTED** — `shutil.rmtree` in `DELETE /tenant` |
+| Semantic cache entries (all for tenant) | `SemanticCache._store` | **IMPLEMENTED** — `SemanticCache.invalidate_by_tenant()` |
+| Judge results (all for tenant) | Redis `judge:result:<tenant>:*` | **IMPLEMENTED** — `JudgeQueue.invalidate_by_tenant()` (GAP-09 closed) |
+| Conversation checkpoints (all for tenant) | `data/checkpoints.sqlite3` / Redis `checkpoint:*` | **IMPLEMENTED** — `SQLiteCheckpointer.delete_tenant_checkpoints()` + `RedisCheckpointer.delete_tenant_checkpoints()` (GAP-07 closed) |
+| Analytics records | `logs/analytics.jsonl`, `user_queries` table | **NOT IMPLEMENTED** (GAP-05, deferred) |
+| User account | `tessera_users.db:users` | **IMPLEMENTED** — `auth.delete_user(user_id)` in `DELETE /tenant` |
 
 ### 3.3 What IS Implemented (Partial Paths)
 
@@ -205,18 +206,18 @@ There is **no dedicated DELETE /documents endpoint** and **no DELETE /tenant end
 
 ## 5. Known Gaps
 
-The following data lifecycle capabilities are **not implemented**. Each gap is a
-future enhancement; none affects current functionality.
+Gaps marked **CLOSED** are fully implemented and tested. Gaps marked **DEFERRED** are documented enhancements
+that do not affect current correctness.
 
-| Gap ID | Description | Impact |
-|---|---|---|
-| GAP-01 | No `DELETE /documents/{filename}` endpoint | Cannot remove a single document without re-uploading all others |
-| GAP-02 | Document deletion does not invalidate semantic cache | Stale answers may be served after a document is removed |
-| GAP-03 | Document deletion does not remove judge results | Orphaned judge results for deleted content remain in Redis until TTL expiry |
-| GAP-04 | No `DELETE /tenant/{slug}` endpoint | Full tenant data removal requires manual filesystem and database operations |
-| GAP-05 | Analytics log and `user_queries` table grow unbounded | No retention policy, rotation, or pruning endpoint |
-| GAP-06 | Judge DLQ has no TTL and no drain API endpoint | Failed jobs accumulate indefinitely; requires direct Redis access to clear |
-| GAP-07 | Checkpoint deletion is not triggered by tenant deletion | Orphaned checkpoints remain until TTL expiry (Redis) or manual DB query (SQLite) |
-| GAP-08 | No per-document Chroma deletion | Chroma's `delete()` API exists but is not wired up; only full-index wipe is implemented |
-| GAP-09 | Judge results have no tenant field in Redis key | Cannot enumerate or purge all judge results for a given tenant without a scan |
-| GAP-10 | `clear_analytics()` and `SemanticCache.clear()` are not exposed via API | No operational path to flush these without code changes |
+| Gap ID | Description | Status | Resolution |
+|---|---|---|---|
+| GAP-01 | No `DELETE /documents/{filename}` endpoint | **CLOSED** | `DELETE /documents/{filename}` endpoint with path traversal validation, file deletion, cache + judge result invalidation, and full index rebuild |
+| GAP-02 | Document deletion does not invalidate semantic cache | **CLOSED** | `SemanticCache.invalidate_by_document(tenant, filename)` wired into `DELETE /documents` |
+| GAP-03 | Document deletion does not remove judge results | **CLOSED** | `JudgeQueue.invalidate_judge_results_for_document(tenant, filename)` wired into `DELETE /documents` |
+| GAP-04 | No `DELETE /tenant` endpoint | **CLOSED** | `DELETE /tenant` removes corpus, Chroma index, cache, judge results, checkpoints, and user row |
+| GAP-05 | Analytics log and `user_queries` table grow unbounded | **DEFERRED** | No retention policy, rotation, or pruning endpoint — tracked for a future release |
+| GAP-06 | Judge DLQ has no TTL and no drain API endpoint | **DEFERRED** | Failed jobs accumulate indefinitely — tracked for a future release |
+| GAP-07 | Checkpoint deletion is not triggered by tenant deletion | **CLOSED** | `SQLiteCheckpointer.delete_tenant_checkpoints(tenant)` and `RedisCheckpointer.delete_tenant_checkpoints(tenant)` wired into `DELETE /tenant` |
+| GAP-08 | No per-document Chroma deletion | **DEFERRED** | Chroma's `delete()` API is not wired; full-index rebuild on `DELETE /documents` is sufficient for correctness |
+| GAP-09 | Judge results have no tenant field in Redis key | **CLOSED** | Redis keys are now `judge:result:<tenant>:<trace_id>`; `/eval/{trace_id}` derives tenant from authenticated user |
+| GAP-10 | `clear_analytics()` and `SemanticCache.clear()` are not exposed via API | **DEFERRED** | No operational path to flush these without code changes — tracked for a future release |
