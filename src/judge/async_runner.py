@@ -79,8 +79,12 @@ def submit_judge(
     evaluate_fn: Callable[..., dict],
     cache_key: str | None = None,
     cache_payload: dict[str, Any] | None = None,
-) -> None:
+) -> dict:
     """Publish a judge job (Redis queue) or schedule in-process (fallback).
+
+    Returns a status dict so callers can surface the actual eval state:
+      {"status": "pending", "trace_id": <id>}   — job successfully queued or scheduled
+      {"status": "unavailable", "reason": "queue_unavailable"}  — Redis publish failed
 
     Returns immediately in both modes so /ask latency is unaffected.
     cache_key / cache_payload are carried in the queue payload; the worker
@@ -108,15 +112,17 @@ def submit_judge(
             with _published_lock:
                 _published_judges += 1
             logger.debug("judge job queued trace_id=%s", trace_id)
+            return {"status": "pending", "trace_id": trace_id}
         else:
-            # Redis unavailable — fall back to in-process to avoid losing the job.
-            logger.warning("Redis publish failed for trace_id=%s — falling back to in-process", trace_id)
-            asyncio.create_task(
-                _run_judge(trace_id, question, answer, contexts, evaluate_fn, cache_key, cache_payload),
-                name=f"judge-fallback-{trace_id}",
+            logger.warning(
+                "judge queue publish failed trace_id=%s",
+                trace_id,
+                extra={"trace_id": trace_id},
             )
+            return {"status": "unavailable", "reason": "queue_unavailable"}
     else:
         asyncio.create_task(
             _run_judge(trace_id, question, answer, contexts, evaluate_fn, cache_key, cache_payload),
             name=f"judge-{trace_id}",
         )
+        return {"status": "pending", "trace_id": trace_id}
