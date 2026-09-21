@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 from langchain_core.documents import Document
 
+from .embedding_resilience import EmbeddingUnavailable
 from .retriever_dense import retrieve_with_scores as retrieve_dense_scored
 from .retriever_sparse import retrieve_sparse
+
+_log = logging.getLogger(__name__)
 
 
 def _dedupe_key(doc: Document) -> tuple[str, str]:
@@ -36,7 +41,17 @@ def retrieve_hybrid(
     the first returned tuple instead of issuing a second vector lookup.
     """
 
-    dense_scored = retrieve_dense_scored(question, top_k=top_k)
+    try:
+        dense_scored = retrieve_dense_scored(question, top_k=top_k)
+    except EmbeddingUnavailable:
+        _log.warning(
+            "embedding unavailable; hybrid retrieval degraded to sparse-only",
+        )
+        sparse_docs = retrieve_sparse(question, top_k=top_k)
+        if not return_scores:
+            return sparse_docs
+        return [(doc, 0.0) for doc in sparse_docs]
+
     dense_docs = [doc for doc, _score in dense_scored]
     sparse_docs = retrieve_sparse(question, top_k=top_k)
 

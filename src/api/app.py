@@ -28,6 +28,7 @@ from src.security.async_crypto import hash_password_async, verify_password_async
 from src.resilience.rate_limiter import RateLimiter, RateLimitError as _RateLimitError
 from src.resilience.bulkhead import BulkheadFullError as _BulkheadFullError
 from src.resilience.circuit_breaker import CircuitOpenError as _CircuitOpenError
+from src.rag.embedding_resilience import EmbeddingUnavailable as _EmbeddingUnavailable
 
 try:
     from observability import latency_store, ALL_STAGES
@@ -612,7 +613,7 @@ async def ask(
                     "usage": _usage,
                     "trace": _r.get("trace", []) or [],
                 }
-                submit_judge(
+                _eval_result = submit_judge(
                     trace_id=_trace_id,
                     question=payload.question,
                     answer=_r.get("answer", ""),
@@ -621,7 +622,6 @@ async def ask(
                     cache_key=_c_key if CACHE_ENABLED else None,
                     cache_payload=_cache_pl if CACHE_ENABLED else None,
                 )
-                _eval_result = {"status": "pending", "trace_id": _trace_id}
             else:
                 _eval_result = _r.get("eval")
                 _guard = _r.get("guard")
@@ -702,6 +702,13 @@ async def ask(
             detail="LLM provider circuit open, retry shortly",
             headers={"Retry-After": "30"},
         )
+    except _EmbeddingUnavailable:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"error": "embedding provider unavailable", "retry_after": 30},
+            headers={"Retry-After": "30"},
+        )
 
     usage = result.get("usage") or {"prompt": 0, "completion": 0, "total": 0}
     tokens = {
@@ -730,7 +737,7 @@ async def ask(
             "usage": usage,
             "trace": result.get("trace", []) or [],
         }
-        submit_judge(
+        eval_result: dict | None = submit_judge(
             trace_id=trace_id,
             question=payload.question,
             answer=result.get("answer", ""),
@@ -739,7 +746,6 @@ async def ask(
             cache_key=_cache_key if CACHE_ENABLED else None,
             cache_payload=_cache_payload if CACHE_ENABLED else None,
         )
-        eval_result: dict | None = {"status": "pending", "trace_id": trace_id}
         guard = None
     else:
         eval_result = result.get("eval")

@@ -9,6 +9,7 @@ from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
 
 from .config import EMBEDDING_MODEL, RETRIEVER_TOP_K, get_openai_api_key
+from .embedding_resilience import embed_with_resilience
 from .tenant_context import active_index_dir
 
 # Phase 3 latency instrumentation. Import is guarded the same way strategies.py
@@ -98,7 +99,7 @@ def _embed_query(vectorstore: Chroma, question: str):
     time out of vector_retrieval.
     """
     with time_stage(Stage.EMBEDDING):
-        return vectorstore.embeddings.embed_query(question)
+        return embed_with_resilience(vectorstore, question)
 
 
 def retrieve(question: str, top_k: int = RETRIEVER_TOP_K):
