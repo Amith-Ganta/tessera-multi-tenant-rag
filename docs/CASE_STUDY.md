@@ -232,3 +232,65 @@ are covered by regression tests (129 tests pass in the full suite).
 - `TestBlockingPop` additions (2 tests): `_attempts` incremented on first pop and on retry
 
 **Evidence:** `uv run python -m pytest tests/ -q` → 129 passed, 0 failures.
+
+---
+
+## Phase 8 — Dependency Failure Analysis and Targeted Fixes (MM-01, MM-02, MM-03)
+
+A comprehensive dependency failure analysis (`docs/DEPENDENCY_FAILURE_MATRIX.md`) was
+performed across all eight runtime dependency categories. Three mismatches (MM-01 to
+MM-03) were identified between claimed and actual failure behaviour.
+
+### MM-01 — Embedding Resilience (Fixed)
+
+**Problem:** Any transient OpenAI embedding API failure caused HTTP 500 with no fallback.
+Dense retrieval and the full answer pipeline were completely blocked.
+
+**Fix:**
+- `src/rag/embedding_resilience.py`: new `EmbeddingUnavailable` exception;
+  `embed_with_resilience()` wraps `embed_query` in the existing `CircuitBreaker` and
+  `main_bulkhead`; raises `EmbeddingUnavailable` when the circuit is open.
+- `src/rag/retriever_dense.py`: uses `embed_with_resilience()`.
+- `src/rag/retriever_hybrid.py`: catches `EmbeddingUnavailable`, falls back to sparse-only
+  BM25 retrieval with score `0.0` for dense arm.
+- `src/api/app.py`: catches `EmbeddingUnavailable` and returns HTTP 503 with
+  `{"error": "embedding provider unavailable"}` and `Retry-After: 30` header.
+
+**Tests added:** `tests/test_embedding_resilience.py` — 6 regression tests.
+
+### MM-02 — Honest Eval Status on Queue Publish Failure (Fixed)
+
+**Problem:** When `judge_queue.publish()` returned `False` (Redis unavailable), the
+`/ask` response still set `eval={"status": "pending"}`. The caller had no way to know
+the job was never queued; polling `GET /eval/{trace_id}` would time out indefinitely.
+
+**Fix:**
+- `src/judge/async_runner.py`: `submit_judge()` now returns a status dict:
+  `{"status": "pending", "trace_id": ...}` on success, or
+  `{"status": "unavailable", "reason": "queue_unavailable"}` on publish failure.
+  Logs a WARNING on failure.
+- `src/api/app.py`: both `/ask` call sites (SSE and non-SSE) use the returned status
+  dict as the `eval` field in `AskResponse` instead of a hardcoded pending dict.
+
+**Tests added:** `tests/test_queue_publish_honesty.py` — 6 regression tests.
+
+### MM-03 — Circuit Breaker State Scope (Accepted Limitation, ADR-014)
+
+**Decision:** Circuit breaker state remains in-process only (not shared across replicas).
+Option A (Redis-backed shared state) was rejected because it would couple the circuit
+breaker to the very class of dependency it protects against, adding a new failure mode.
+
+A startup WARNING log (`src/api/app.py`) and formal ADR (`docs/adr/ADR-014.md`) document
+the limitation for operators. Upgrade path to Option A is described in the ADR.
+
+### Updated Test Count
+
+**Evidence:** `uv run python -m pytest tests/ -q`
+
+| Stage | Tests |
+|---|---|
+| Pre-existing (Phases 1–7) | 129 |
+| Dependency failure regression (Phase 8 initial) | 11 |
+| MM-01 embedding resilience | 6 |
+| MM-02 queue publish honesty | 6 |
+| **Total** | **152** |
