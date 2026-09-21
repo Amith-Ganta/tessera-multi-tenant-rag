@@ -320,5 +320,19 @@ def promote_admin(email: str) -> bool:
         conn.close()
 
 
+def delete_user(user_id: int) -> bool:
+    """Hard-delete the user row identified by user_id. Returns True if a row was removed."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM users WHERE id = ?", (int(user_id),))
+        conn.commit()
+        return c.rowcount > 0
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+
+
 if not DB_PATH.exists():
     init_db()

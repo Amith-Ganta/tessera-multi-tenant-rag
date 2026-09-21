@@ -91,6 +91,40 @@ class RedisCheckpointer:
             logger.error("RedisCheckpointer: delete_state failed for %s: %s", thread_id, exc)
             return False
 
+    def delete_tenant_checkpoints(self, tenant: str) -> int:
+        """Delete all checkpoints belonging to tenant by SCAN + JSON filter.
+
+        Redis keys have no tenant component (they are keyed by thread_id), so we
+        must SCAN the full checkpoint keyspace and inspect the JSON body of each
+        entry.  This is linear in the number of checkpoints but checkpoints are
+        short-lived TTL keys so the keyspace is bounded.  Returns count deleted.
+        """
+        client = _get_client()
+        if client is None:
+            return 0
+        count = 0
+        pattern = self._prefix + "*"
+        try:
+            cursor = 0
+            while True:
+                cursor, keys = client.scan(cursor, match=pattern, count=100)
+                for key in keys:
+                    try:
+                        raw = client.get(key)
+                        if raw is None:
+                            continue
+                        state = json.loads(raw)
+                        if state.get("tenant_slug") == tenant:
+                            client.delete(key)
+                            count += 1
+                    except Exception:
+                        pass
+                if cursor == 0:
+                    break
+        except Exception as exc:
+            logger.error("RedisCheckpointer: delete_tenant_checkpoints failed for %s: %s", tenant, exc)
+        return count
+
 
 def checkpointer_factory():
     """Return the configured checkpointer instance.

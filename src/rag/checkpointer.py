@@ -119,3 +119,19 @@ class SQLiteCheckpointer:
                 )
                 conn.commit()
                 return cur.rowcount > 0
+
+    def delete_tenant_checkpoints(self, tenant: str) -> int:
+        """Delete all checkpoints whose state carries tenant_slug == tenant.
+
+        Uses SQLite's json_extract() so no full table scan into Python is needed.
+        Returns the number of rows deleted.
+        """
+        self._init_db()
+        with self._lock:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    "DELETE FROM checkpoints WHERE json_extract(state_json, '$.tenant_slug') = ?",
+                    (tenant,),
+                )
+                conn.commit()
+                return cur.rowcount
