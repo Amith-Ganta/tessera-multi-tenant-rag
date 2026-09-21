@@ -146,26 +146,30 @@ The following documented or asserted behaviours are **absent or incomplete** in 
 
 | ID | Claimed | Actual | Location |
 |---|---|---|---|
-| MM-01 | Embedding failures have a fallback | No embedding fallback exists. `_FALLBACK_CHAIN` covers generation only. | `src/rag/llm.py:88`; `src/rag/retriever_dense.py` |
-| MM-02 | Judge-queue publish failure is surfaced to the caller | `publish()` returns `False` but the `/ask` handler does not check the return value or emit a warning in the response. Eval stays `{"status": "pending"}` indefinitely with no indication the job was dropped. | `src/judge/redis_queue.py:88-100`; `src/api/app.py:733` |
-| MM-03 | Circuit-breaker state is shared / consistent under multi-replica deploy | State is in-process only. Three replicas maintain three independent counters. One replica can be open while others are closed. | `src/rag/llm.py:38`; noted in `docs/CASE_STUDY.md` |
+| MM-01 | Embedding failures have a fallback | ~~No embedding fallback exists.~~ **FIXED** (commit f7d8d43): `EmbeddingUnavailable` exception + circuit breaker + bulkhead added via `src/rag/embedding_resilience.py`; hybrid retrieval degrades to sparse-only (BM25); `/ask` returns HTTP 503 with `Retry-After: 30`. | `src/rag/embedding_resilience.py`; `src/rag/retriever_hybrid.py`; `src/api/app.py` |
+| MM-02 | Judge-queue publish failure is surfaced to the caller | ~~Publish failure silently dropped.~~ **FIXED** (commit 577d784): `submit_judge()` now returns `{"status": "unavailable", "reason": "queue_unavailable"}` when `publish()` returns `False`; warning logged; `/ask` `eval` field reflects actual status. | `src/judge/async_runner.py`; `src/api/app.py` |
+| MM-03 | Circuit-breaker state is shared / consistent under multi-replica deploy | **Accepted limitation** (ADR-014): state remains in-process only. Startup WARNING log added. Multi-replica coordination deferred — see `docs/adr/ADR-014.md` for full rationale. | `src/resilience/circuit_breaker.py`; `src/api/app.py` (startup warning) |
 
 ---
 
 ## 4. Top Three Unmitigated Failures
 
-Ranked by impact on query correctness and silent failure risk:
+> **Update 2026-09-21:** MM-01 and MM-02 have been fixed (commits f7d8d43 and 577d784).
+> MM-03 is accepted as a documented limitation (ADR-014). The section below is
+> preserved for historical context; see the Mismatches table above for current status.
 
-1. **OpenAI Embedding failure (MM-01)** — Any network error to the OpenAI embedding
+Ranked by impact on query correctness and silent failure risk (original assessment):
+
+1. **~~OpenAI Embedding failure (MM-01)~~** — ~~Any network error to the OpenAI embedding
    endpoint turns every `/ask` request into an HTTP 500 with no fallback, no retry,
-   and no graceful degradation. Retrieval and the entire answer pipeline are blocked.
+   and no graceful degradation.~~ **FIXED**: circuit breaker + sparse fallback added.
 
-2. **Judge-queue publish drop silently (MM-02)** — When Redis is unavailable at
+2. **~~Judge-queue publish drop silently (MM-02)~~** — ~~When Redis is unavailable at
    publish time, `publish()` drops the job and returns `False`. The `/ask` response
-   still sets `eval={"status": "pending", ...}`. The caller has no way to know the
-   job was never queued. Polling `GET /eval/{trace_id}` will time out indefinitely.
+   still sets `eval={"status": "pending", ...}`.~~ **FIXED**: honest `unavailable`
+   status now surfaced in `/ask` response and logged at WARNING.
 
 3. **Rate-limiter fail-open (no alerting) (partial MM-03 impact)** — When Redis is
    down, all tenant rate limits are bypassed without any indication to the operator
    or caller that enforcement is off. A sustained Redis outage gives every tenant
-   unlimited throughput.
+   unlimited throughput. (No fix planned; acceptable for current deployment scale.)

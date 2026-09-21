@@ -193,6 +193,18 @@ def _warm_reranker() -> None:
         pass
 
 
+@app.on_event("startup")
+def _warn_circuit_breaker_scope() -> None:
+    # MM-03 (ADR-014): circuit breaker state is in-process only.
+    # In a multi-replica deployment each replica tracks failures independently,
+    # so one replica may serve traffic while another has opened its breaker.
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "circuit breaker state is in-process only (not shared across replicas); "
+        "see docs/adr/ADR-014.md for rationale and operational guidance"
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
