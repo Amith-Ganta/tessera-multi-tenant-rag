@@ -838,13 +838,16 @@ def eval_result_endpoint(
     Returns 202 while the judge is still running, 200 when done, 404 if the
     trace_id is unknown.  In queue mode, checks Redis first (worker writes
     results there); falls back to the in-process judge_store ring buffer.
+    Results are tenant-scoped: a user can only retrieve their own results.
     """
     from src.rag.config import JUDGE_QUEUE_ENABLED
+    user_id, _email = user
+    tenant = auth.tenant_slug(user_id)
     entry: dict | None = None
 
     if JUDGE_QUEUE_ENABLED:
         from src.judge.redis_queue import judge_queue
-        entry = judge_queue.get_result(trace_id)
+        entry = judge_queue.get_result(trace_id, tenant=tenant)
 
     if entry is None:
         entry = judge_store.get(trace_id)
@@ -855,6 +858,122 @@ def eval_result_endpoint(
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=202, content={"status": "pending", "trace_id": trace_id})
     return entry
+
+
+@app.delete("/documents/{filename}", status_code=204)
+async def delete_document(
+    filename: str,
+    user: tuple[int, str] = Depends(get_current_user),
+) -> None:
+    """Delete a single document from the tenant corpus and rebuild the index.
+
+    Path traversal safety: rejects filenames containing "..", "/", "\\", null
+    bytes, or leading dots.  After removing the file the semantic cache entries
+    derived from it and any Redis judge results for the file are invalidated,
+    then the tenant index is rebuilt from the remaining corpus.
+    """
+    import asyncio as _asyncio
+    import logging as _logging
+
+    _log = _logging.getLogger(__name__)
+
+    # Path traversal validation.
+    if (
+        not filename
+        or "\x00" in filename
+        or ".." in filename
+        or "/" in filename
+        or "\\" in filename
+        or filename.startswith(".")
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid filename")
+
+    user_id, _email = user
+    tenant = auth.tenant_slug(user_id)
+    corpus_dir = tenant_corpus_dir(tenant)
+    target = corpus_dir / filename
+
+    # Verify the resolved path stays inside the corpus dir (defence-in-depth).
+    try:
+        target.resolve().relative_to(corpus_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid filename")
+
+    if not target.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
+
+    target.unlink()
+
+    # GAP-02: invalidate semantic cache entries for this document.
+    evicted = semantic_cache.invalidate_by_document(tenant, filename)
+    _log.info("cache invalidation after document delete: tenant=%s file=%s evicted=%d", tenant, filename, evicted)
+
+    # GAP-03: invalidate judge results whose sources include this document.
+    from src.rag.config import JUDGE_QUEUE_ENABLED
+    if JUDGE_QUEUE_ENABLED:
+        from src.judge.redis_queue import judge_queue as _jq
+        _jq.invalidate_judge_results_for_document(tenant, filename)
+
+    # Rebuild the tenant index without the deleted file.
+    loop = _asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda: build_tenant_index(tenant))
+
+
+@app.delete("/tenant", status_code=204)
+async def delete_tenant(
+    user: tuple[int, str] = Depends(get_current_user),
+) -> None:
+    """GDPR-compliant full tenant data removal.
+
+    Deletes in order: corpus files, Chroma index, semantic cache, judge results,
+    conversation checkpoints, and the user row.  Idempotent — a second call on a
+    fully deleted tenant returns 204 without error.  The tenant slug is derived
+    from the authenticated user; there is no slug parameter to prevent cross-tenant
+    deletion.
+    """
+    import asyncio as _asyncio
+    import shutil as _shutil
+    import logging as _logging
+    import uuid as _uuid
+
+    _log = _logging.getLogger(__name__)
+    user_id, _email = user
+    tenant = auth.tenant_slug(user_id)
+    trace_id = str(_uuid.uuid4())
+    _log.warning("tenant delete requested: tenant=%s trace_id=%s", tenant, trace_id)
+
+    # 1. Raw documents
+    corpus_dir = tenant_corpus_dir(tenant)
+    if corpus_dir.exists():
+        _shutil.rmtree(corpus_dir, ignore_errors=True)
+
+    # 2. Chroma vector index
+    from src.rag.tenant_context import tenant_index_dir
+    index_dir = tenant_index_dir(tenant)
+    if index_dir.exists():
+        _shutil.rmtree(index_dir, ignore_errors=True)
+
+    # 3. Semantic cache (all entries for this tenant)
+    semantic_cache.invalidate_by_tenant(tenant)
+
+    # 4. Judge results in Redis
+    from src.rag.config import JUDGE_QUEUE_ENABLED
+    if JUDGE_QUEUE_ENABLED:
+        from src.judge.redis_queue import judge_queue as _jq
+        _jq.invalidate_by_tenant(tenant)
+
+    # 5. Conversation checkpoints (GAP-07)
+    from src.rag.checkpointer import SQLiteCheckpointer
+    loop = _asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda: SQLiteCheckpointer().delete_tenant_checkpoints(tenant))
+
+    from src.state.redis_checkpointer import RedisCheckpointer
+    RedisCheckpointer().delete_tenant_checkpoints(tenant)
+
+    # 6. User row (auth DB)
+    auth.delete_user(user_id)
+
+    _log.warning("tenant delete complete: tenant=%s trace_id=%s", tenant, trace_id)
 
 
 @app.get("/admin/analytics")

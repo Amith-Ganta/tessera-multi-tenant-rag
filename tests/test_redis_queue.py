@@ -155,3 +155,76 @@ class TestDLQ:
         for i in range(3):
             fake_redis_client.lpush("test:queue:dlq", json.dumps({"_raw": str(i)}))
         assert q.dlq_depth() == 3
+
+
+# ---------------------------------------------------------------------------
+# GAP-09: Tenant-scoped result keys
+# ---------------------------------------------------------------------------
+
+class TestTenantScopedResults:
+    """GAP-09 — judge results are keyed by <prefix><tenant>:<trace_id>."""
+
+    def test_set_result_with_tenant_uses_scoped_key(self, fake_redis_client):
+        q = make_queue()
+        q.set_result("t1", {"status": "done"}, tenant="user-1")
+        # Scoped key must exist.
+        assert fake_redis_client.exists("test:result:user-1:t1")
+        # Legacy key must NOT exist when tenant is given.
+        assert not fake_redis_client.exists("test:result:t1")
+
+    def test_get_result_with_tenant_reads_scoped_key(self, fake_redis_client):
+        q = make_queue()
+        q.set_result("t2", {"score": 0.8}, tenant="user-2")
+        result = q.get_result("t2", tenant="user-2")
+        assert result is not None
+        assert result["score"] == pytest.approx(0.8)
+
+    def test_tenant_a_cannot_read_tenant_b_result(self, fake_redis_client):
+        q = make_queue()
+        q.set_result("t3", {"secret": True}, tenant="user-3")
+        # user-4 key does not exist; legacy fallback finds nothing either.
+        result = q.get_result("t3", tenant="user-4")
+        assert result is None
+
+    def test_legacy_fallback_reads_unscoped_key(self, fake_redis_client):
+        """Results written before GAP-09 (no tenant prefix) must still be readable."""
+        import json
+        # Simulate old worker: write directly to legacy key.
+        fake_redis_client.set("test:result:legacy-trace", json.dumps({"status": "legacy"}))
+        q = make_queue()
+        # With tenant supplied, fallback to legacy key when scoped key is missing.
+        result = q.get_result("legacy-trace", tenant="user-5")
+        assert result is not None
+        assert result["status"] == "legacy"
+
+    def test_invalidate_by_tenant_deletes_only_that_tenant(self, fake_redis_client):
+        q = make_queue()
+        q.set_result("r1", {"x": 1}, tenant="user-10")
+        q.set_result("r2", {"x": 2}, tenant="user-10")
+        q.set_result("r3", {"x": 3}, tenant="user-20")
+        deleted = q.invalidate_by_tenant("user-10")
+        assert deleted == 2
+        assert q.get_result("r1", tenant="user-10") is None
+        assert q.get_result("r2", tenant="user-10") is None
+        assert q.get_result("r3", tenant="user-20") is not None
+
+    def test_invalidate_judge_results_for_document(self, fake_redis_client):
+        """invalidate_judge_results_for_document evicts entries whose contexts include the file."""
+        import json
+        q = make_queue()
+        # Write directly with matching source path.
+        fake_redis_client.set(
+            "test:result:user-7:trace-a",
+            json.dumps({"contexts": ["/data/tenants/user-7/corpus/report.pdf"], "status": "done"}),
+        )
+        # Another entry for same tenant but different file.
+        fake_redis_client.set(
+            "test:result:user-7:trace-b",
+            json.dumps({"contexts": ["/data/tenants/user-7/corpus/other.txt"], "status": "done"}),
+        )
+        deleted = q.invalidate_judge_results_for_document("user-7", "report.pdf")
+        assert deleted == 1
+        # The matching entry must be gone.
+        assert fake_redis_client.get("test:result:user-7:trace-a") is None
+        # The unrelated entry must survive.
+        assert fake_redis_client.get("test:result:user-7:trace-b") is not None

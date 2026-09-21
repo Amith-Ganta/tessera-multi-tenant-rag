@@ -101,13 +101,30 @@ class JudgeQueue:
 
     # ── result store ──────────────────────────────────────────────────────────
 
-    def get_result(self, trace_id: str) -> dict | None:
-        """Return the stored result dict, or None if absent / Redis down."""
+    def _result_key(self, tenant: str, trace_id: str) -> str:
+        """Return the Redis key for a judge result, tenant-scoped.
+
+        Format: <prefix><tenant>:<trace_id>
+        Example: judge:result:user-1:abc-def-...
+        """
+        return self._prefix + tenant + ":" + trace_id
+
+    def get_result(self, trace_id: str, tenant: str = "") -> dict | None:
+        """Return the stored result dict, or None if absent / Redis down.
+
+        When tenant is supplied the key is <prefix><tenant>:<trace_id>.
+        When tenant is empty the legacy key <prefix><trace_id> is tried for
+        backward compatibility with any results written before GAP-09 was fixed.
+        """
         client = _get_client()
         if client is None:
             return None
         try:
-            raw = client.get(self._prefix + trace_id)
+            key = self._result_key(tenant, trace_id) if tenant else self._prefix + trace_id
+            raw = client.get(key)
+            if raw is None and tenant:
+                # Fallback to legacy key so in-flight results before the fix are readable.
+                raw = client.get(self._prefix + trace_id)
             if raw is None:
                 return None
             return json.loads(raw)
@@ -115,15 +132,84 @@ class JudgeQueue:
             logger.error("get_result failed for trace_id=%s: %s", trace_id, exc)
             return None
 
-    def set_result(self, trace_id: str, result: dict[str, Any], ttl: int = 86400) -> None:
-        """Persist a result dict with a TTL (default 24 h)."""
+    def set_result(self, trace_id: str, result: dict[str, Any], ttl: int = 86400,
+                   tenant: str = "") -> None:
+        """Persist a result dict with a TTL (default 24 h).
+
+        When tenant is supplied the key is <prefix><tenant>:<trace_id>.
+        """
         client = _get_client()
         if client is None:
             return
         try:
-            client.set(self._prefix + trace_id, json.dumps(result), ex=ttl)
+            key = self._result_key(tenant, trace_id) if tenant else self._prefix + trace_id
+            client.set(key, json.dumps(result), ex=ttl)
         except Exception as exc:
             logger.error("set_result failed for trace_id=%s: %s", trace_id, exc)
+
+    def invalidate_judge_results_for_document(self, tenant: str, filename: str) -> int:
+        """Delete judge results whose contexts include paths ending with filename.
+
+        Judge result payloads carry a ``contexts`` field (list of source path
+        strings) populated by the worker.  We scan all tenant-scoped result keys
+        and evict entries whose contexts reference the target file.  Returns count
+        of keys deleted.
+        """
+        client = _get_client()
+        if client is None:
+            return 0
+        pattern = self._prefix + tenant + ":*"
+        count = 0
+        try:
+            cursor = 0
+            while True:
+                cursor, keys = client.scan(cursor, match=pattern, count=100)
+                for key in keys:
+                    try:
+                        raw = client.get(key)
+                        if raw is None:
+                            continue
+                        result = json.loads(raw)
+                        sources = result.get("contexts") or result.get("sources") or []
+                        if any(
+                            str(s).endswith("/" + filename) or
+                            str(s).endswith("\\" + filename) or
+                            str(s) == filename
+                            for s in sources
+                        ):
+                            client.delete(key)
+                            count += 1
+                    except Exception:
+                        pass
+                if cursor == 0:
+                    break
+        except Exception as exc:
+            logger.error("invalidate_judge_results_for_document failed for %s/%s: %s", tenant, filename, exc)
+        return count
+
+    def invalidate_by_tenant(self, tenant: str) -> int:
+        """Delete all judge results for a tenant. Returns count of keys deleted.
+
+        Uses SCAN to avoid blocking the Redis server on large keyspaces.
+        Only works when using the tenant-scoped key format (GAP-09 fix).
+        """
+        client = _get_client()
+        if client is None:
+            return 0
+        pattern = self._prefix + tenant + ":*"
+        count = 0
+        try:
+            cursor = 0
+            while True:
+                cursor, keys = client.scan(cursor, match=pattern, count=100)
+                if keys:
+                    client.delete(*keys)
+                    count += len(keys)
+                if cursor == 0:
+                    break
+        except Exception as exc:
+            logger.error("invalidate_by_tenant failed for tenant=%s: %s", tenant, exc)
+        return count
 
     # ── capacity ──────────────────────────────────────────────────────────────
 

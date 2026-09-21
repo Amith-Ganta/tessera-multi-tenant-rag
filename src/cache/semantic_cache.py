@@ -76,6 +76,65 @@ class SemanticCache:
                 "hit_rate": self._hits / total if total > 0 else 0.0,
             }
 
+    def invalidate_by_document(self, tenant: str, filename: str) -> int:
+        """Remove cache entries whose chunk IDs reference the given document.
+
+        Cache keys are SHA-256 hashes so we cannot inspect them directly.  The
+        cache stores the raw payload dict, which includes a ``sources`` field
+        whose values are LangChain ``source`` metadata strings — absolute paths
+        ending in ``/<filename>``.  We scan entries and evict any whose
+        ``sources`` list contains a path that ends with the target filename.
+
+        Returns the number of entries removed.
+        """
+        removed = 0
+        target = filename if not filename.startswith("/") and not filename.startswith("\\") else filename.split("/")[-1].split("\\")[-1]
+        with self._lock:
+            keys_to_remove = []
+            for key, (payload, _ts) in self._store.items():
+                sources = payload.get("sources", []) or []
+                if any(
+                    str(s).endswith("/" + target) or
+                    str(s).endswith("\\" + target) or
+                    str(s) == target
+                    for s in sources
+                ):
+                    keys_to_remove.append(key)
+            for k in keys_to_remove:
+                del self._store[k]
+                removed += 1
+        return removed
+
+    def invalidate_by_tenant(self, tenant: str) -> int:
+        """Remove all cache entries belonging to a tenant. Returns count removed.
+
+        SemanticCache.make_key() embeds the tenant as the first segment of the
+        pre-hash input but the stored key is a SHA-256 hex digest — we cannot
+        reverse it.  The payload dict carries no tenant field either, so the
+        only safe approach is to evict entries whose payload has a ``tenant``
+        field equal to the target, or to fall back to clearing the whole cache
+        when no tenant tag is stored.  We tag the payload at write time (via
+        SemanticCache.set_tagged) when a tenant is known; callers that use the
+        bare set() API will not have a tag and are not cleared here.
+        """
+        removed = 0
+        with self._lock:
+            keys_to_remove = [
+                k for k, (payload, _ts) in self._store.items()
+                if payload.get("_tenant") == tenant
+            ]
+            for k in keys_to_remove:
+                del self._store[k]
+                removed += 1
+        return removed
+
+    def set_tagged(self, key: str, payload: dict, tenant: str) -> None:
+        """Like set(), but embeds _tenant in the payload for later invalidation."""
+        tagged = dict(payload)
+        tagged["_tenant"] = tenant
+        with self._lock:
+            self._store[key] = (tagged, time.monotonic())
+
     def clear(self) -> None:
         with self._lock:
             self._store.clear()
