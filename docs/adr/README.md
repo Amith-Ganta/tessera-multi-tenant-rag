@@ -19,5 +19,7 @@
 | [ADR-015](ADR-015.md) | Fail-Open Rate Limiter vs Fail-Closed Tenant Governor | Accepted |
 | [ADR-016](ADR-016.md) | Per-Tenant Resource Governance via Redis Counters | Accepted |
 | [ADR-017](ADR-017.md) | Five-Threshold Quality Gate | Accepted |
+| [ADR-018](ADR-018.md) | Centralised Cost Observability Module | Accepted |
+| [ADR-019](ADR-019.md) | Shadow Evaluation and Fail-Closed Promotion Gate | Accepted |
 
 ADRs follow the [Nygard format](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions): Context, Decision, Alternatives Considered, Consequences.

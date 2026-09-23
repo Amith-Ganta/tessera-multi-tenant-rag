@@ -8,30 +8,38 @@
 
 ## ADR Counter
 Baseline: ADR-017 (highest existing)  
-Next available: ADR-018
+ADR-013, ADR-015 added in Phase A.  
+ADR-018 added in Phase B1 (cost observability).  
+ADR-019 added in Phase B5 (shadow eval + promotion gate).  
+Next available: ADR-020
 
 ## Test Counter
-Baseline: 203
+Baseline: 203  
+Phase A added: 22 tests — Gate A confirmed 225 passing.  
+Phase B1 added: 14 tests (test_cost_observability.py) — all pass.  
+Phase B2/B3 added: 12 tests (test_queue_dlq.py) — all pass.  
+Phase B5 added: 15 tests (test_shadow_eval.py) — all pass.  
+Total after B1-B5: 264 (Gate B confirmed)
 
 ## Phase A — Resolve Audit Uncertainties
 
 | ID | Status | Artifact | Commit |
 |----|--------|----------|--------|
-| A1 | [WIP]  | src/security/ssrf.py, tests/test_ssrf.py | — |
-| A2 | —      | tests/test_cors.py | — |
-| A3 | —      | tests/test_concurrency.py | — |
-| A4 | —      | A2A analytics fix | — |
-| A5 | —      | docs/adr/ADR-013.md, ADR-015.md | — |
+| A1 | [DONE] | src/security/ssrf.py, tests/test_ssrf.py (11 pass) | 4b86a26 |
+| A2 | [DONE] | src/api/app.py CORS, tests/test_cors.py (5 pass) | 4b86a26 |
+| A3 | [DONE] | src/api/app.py SSE guard, tests/test_concurrency.py (4 pass) | 4b86a26 |
+| A4 | [DONE] | A2A analytics _VERSIONS fix, tests/test_a2a_analytics.py (2 pass) | 4b86a26 |
+| A5 | [DONE] | docs/adr/ADR-013.md, docs/adr/ADR-015.md, docs/adr/README.md | 4b86a26 |
 
 ## Phase B — Phase 3 Remaining
 
 | ID | Status | Artifact | Commit |
 |----|--------|----------|--------|
-| B1 | — | src/observability/cost.py, tests/test_cost_budgeting.py | — |
-| B2 | — | queue metrics + bounded admission | — |
-| B3 | — | DLQ (already exists — verify/extend) | — |
+| B1 | [DONE] | src/observability/cost.py, docs/COST_MODEL.md, docs/adr/ADR-018.md, tests/test_cost_observability.py (14 pass) | pending-B-commit |
+| B2 | [DONE] | queue_depth()/is_over_capacity() + tests/test_queue_dlq.py (12 pass) | pending-B-commit |
+| B3 | [DONE] | peek_dlq()/drain_dlq() + /admin/dlq endpoints + tests (12 pass combined with B2) | pending-B-commit |
 | B4 | — | RAG observability signals | — |
-| B5 | — | src/rag/promotion_gate.py, tests/test_shadow_eval.py | — |
+| B5 | [DONE] | src/rag/promotion_gate.py, docs/adr/ADR-019.md, tests/test_shadow_eval.py (15 pass) | pending-B-commit |
 | B6 | — | docs/DATA_LIFECYCLE.md | — |
 | B7 | — | docs/DISASTER_RECOVERY.md | — |
 | B8 | — | docs/DEPENDENCY_FAILURE_MATRIX.md | — |

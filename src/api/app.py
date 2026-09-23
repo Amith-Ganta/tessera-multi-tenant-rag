@@ -1074,6 +1074,29 @@ def admin_analytics(limit: int = 100, user: tuple[int, str] = Depends(get_curren
     return {"records": read_analytics(limit)}
 
 
+@app.get("/admin/dlq")
+def admin_dlq_peek(count: int = 20, user: tuple[int, str] = Depends(get_current_user)) -> dict:
+    """Return up to count DLQ entries (newest first) without removing them. Admin only."""
+    if not auth.is_admin(user[1]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
+    from src.judge.redis_queue import judge_queue as _jq
+    return {
+        "dlq_depth": _jq.dlq_depth(),
+        "queue_depth": _jq.queue_depth(),
+        "entries": _jq.peek_dlq(count),
+    }
+
+
+@app.delete("/admin/dlq")
+def admin_dlq_drain(user: tuple[int, str] = Depends(get_current_user)) -> dict:
+    """Drain (delete) all DLQ entries. Returns count removed. Admin only."""
+    if not auth.is_admin(user[1]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
+    from src.judge.redis_queue import judge_queue as _jq
+    drained = _jq.drain_dlq()
+    return {"drained": drained}
+
+
 @app.get("/metrics/latency")
 def metrics_latency(user: tuple[int, str] = Depends(get_current_user)) -> dict:
     """Per-stage latency percentiles from the in-process ring buffer.

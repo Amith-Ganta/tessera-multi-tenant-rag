@@ -299,6 +299,39 @@ class JudgeQueue:
         except Exception:
             return 0
 
+    def peek_dlq(self, count: int = 20) -> list[dict]:
+        """Return up to count DLQ entries (newest first) without removing them."""
+        client = _get_client()
+        if client is None:
+            return []
+        try:
+            raws = client.lrange(self._dlq, 0, count - 1)
+            result = []
+            for raw in raws:
+                try:
+                    result.append(json.loads(raw))
+                except json.JSONDecodeError:
+                    result.append({"_raw": raw, "_parse_error": True})
+            return result
+        except Exception as exc:
+            logger.error("peek_dlq failed: %s", exc)
+            return []
+
+    def drain_dlq(self) -> int:
+        """Remove all entries from the DLQ. Returns count deleted."""
+        client = _get_client()
+        if client is None:
+            return 0
+        try:
+            depth = int(client.llen(self._dlq))
+            if depth > 0:
+                client.delete(self._dlq)
+                logger.warning("DLQ drained: %d entries removed", depth)
+            return depth
+        except Exception as exc:
+            logger.error("drain_dlq failed: %s", exc)
+            return 0
+
 
 # Module-level singleton used by the FastAPI app and the worker
 judge_queue = JudgeQueue()
