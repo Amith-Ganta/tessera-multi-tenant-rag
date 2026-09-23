@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -201,6 +202,22 @@ _tenant_governor: _TenantGovernor | _NullTenantGovernor = (
 )
 
 app = FastAPI(title="Tessera Multi-Tenant RAG API")
+
+# CORS: allow only origins listed in TESSERA_ALLOWED_ORIGINS (comma-separated).
+# No wildcard — every credential-carrying endpoint requires an explicit origin.
+# Fall back to an empty list so requests from unknown origins are blocked by default.
+_ALLOWED_ORIGINS: list[str] = [
+    o.strip()
+    for o in _os.environ.get("TESSERA_ALLOWED_ORIGINS", "").split(",")
+    if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 @app.on_event("startup")
@@ -423,6 +440,7 @@ def _run_a2a(
             "eval": None,
             "guard": guard,
             "trace": a2a.get("trace", []) or [],
+            "versions": _VERSIONS,  # A4 fix: A2A path now includes version context
         })
     except Exception:
         pass
@@ -595,6 +613,18 @@ async def ask(
         return _r
 
     if _is_sse:
+        # Phase A3 fix: SSE requests must honour the per-tenant concurrent limit
+        # just like sync requests.  Acquire before entering the generator; release
+        # in the generator's finally block so the slot is freed even if the client
+        # disconnects mid-stream or the LLM thread raises.
+        if not _tenant_governor.acquire_concurrent(tenant):
+            from fastapi.responses import JSONResponse as _JSONResponse
+            return _JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={"error": "tenant concurrent request limit exceeded"},
+                headers={"Retry-After": "5"},
+            )
+
         # Real streaming: bridge sync LLM thread → async SSE generator via stdlib Queue.
         # Using threading.Thread + queue.Queue (not asyncio.Queue) is TestClient-safe:
         # the thread runs independently of the event loop, and the generator awaits
@@ -632,6 +662,9 @@ async def ask(
                         break
                     yield f"data: {json.dumps({'token': item})}\n\n"
             finally:
+                # Release the concurrent slot whether the stream completed normally,
+                # the client disconnected, or an exception occurred.
+                _tenant_governor.release_concurrent(tenant)
                 _worker.join(timeout=60)
 
             # Thread has finished; assemble full response and emit done event.

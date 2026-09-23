@@ -14,7 +14,9 @@
 | [ADR-010](ADR-010.md) | Autoscaling Strategy: HPA on Queue Depth for Judge Workers | Accepted |
 | [ADR-011](ADR-011.md) | Canary deployment for model version changes | Accepted |
 | [ADR-012](ADR-012.md) | LLM Deployment Governance | Accepted |
+| [ADR-013](ADR-013.md) | Tenant Identity Derivation from User ID | Accepted |
 | [ADR-014](ADR-014.md) | Circuit Breaker State Scope — In-Process Only | Accepted |
+| [ADR-015](ADR-015.md) | Fail-Open Rate Limiter vs Fail-Closed Tenant Governor | Accepted |
 | [ADR-016](ADR-016.md) | Per-Tenant Resource Governance via Redis Counters | Accepted |
 | [ADR-017](ADR-017.md) | Five-Threshold Quality Gate | Accepted |
 
