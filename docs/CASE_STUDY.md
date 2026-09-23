@@ -464,3 +464,81 @@ The CI evaluation gate was extended from 2 to 5 thresholds.  In addition to mean
 
 A lightweight offline experiment framework was added under `experiments/`.  `ExperimentConfig` is a serialisable dataclass backed by JSON baselines (`baseline`, `high-recall`, `low-latency`).  `run_experiment()` accepts an injectable `embedder_fn` so experiments run without real API calls.  Per-query metrics (precision@k, recall@k, latency_ms) are aggregated into means.  The framework is CI-safe: it raises `RuntimeError` if invoked without an embedder_fn and no production embedder is configured.
 
+---
+
+## Phase A — Audit Uncertainties (Security and Resilience)
+
+A targeted audit before Phase B hardened four outstanding gaps.
+
+### A1 — SSRF Guard
+
+`src/security/ssrf.py` — DNS-based SSRF guard blocks requests to private RFC 1918 ranges, loopback, link-local, and metadata endpoints (169.254.0.0/16, GCP/AWS metadata IPs). 11 regression tests.
+
+### A2 — CORS Hardening
+
+`src/api/app.py` — `allow_origins` restricted to configurable whitelist via `CORS_ALLOWED_ORIGINS` env var; wildcard removed. 5 regression tests.
+
+### A3 — SSE Concurrent Slot Guard
+
+The SSE (`/ask` streaming) path now shares the same `main_bulkhead` semaphore as the non-SSE path, preventing unbounded SSE connections from bypassing the bulkhead under load. 4 regression tests.
+
+### A4 — A2A Analytics `_VERSIONS` Fix
+
+A2A analytics calls were passing a raw dict for `_VERSIONS` instead of the structured `AskResponse.versions` field, silently dropping version provenance from analytics records. Fixed and covered with 2 regression tests.
+
+### A5 — ADR-013 + ADR-015
+
+Two design decisions formalised: ADR-013 (Tenant Identity Derivation from User ID) and ADR-015 (Fail-Open Rate Limiter vs. Fail-Closed Tenant Governor).
+
+**Test count after Phase A:** 225 (22 added).
+
+---
+
+## Phase B — Observability, Quality Gates, and Operations
+
+### B1 — Cost Observability Module (ADR-018)
+
+`src/observability/cost.py` — centralised `RATES` dict and `estimate_usd()` derive per-request cost from model and token count. `record()` / `spend_so_far()` / `over_cap()` provide an in-process daily accumulator with an optional `TESSERA_DAILY_SPEND_USD_CAP` env-var gate. 14 regression tests.
+
+### B2 / B3 — Queue Metrics and DLQ Drain
+
+`JudgeQueue` extended with `queue_depth()`, `is_over_capacity()`, `peek_dlq()`, `drain_dlq()`. Two admin endpoints: `GET /admin/dlq` (peek) and `DELETE /admin/dlq` (drain). Admin-only; returns 403 for non-admin callers. 12 regression tests.
+
+### B4 — RAG Quality Signals (ADR-020)
+
+`src/observability/rag_signals.py` — `record_rag_signals()` writes a `rag_quality` record to `logs/analytics.jsonl` alongside the existing `ask` record. Captures retrieval scores, context count, eval pass rate, guard retries, and estimated cost. Fully fail-safe (exceptions return `{}`). 22 regression tests.
+
+### B5 — Shadow Evaluation and Promotion Gate (ADR-019)
+
+`src/rag/promotion_gate.py` — `run_shadow_experiment()` runs a candidate Chroma index in shadow against the production index on the same question set. `compare()` is fail-closed: returns `REJECT` unless the candidate outperforms by `PROMOTION_MARGIN = 0.02` across at least `MIN_SHADOW_SAMPLES = 5` samples. 15 regression tests.
+
+### B6 — Documentation Refresh
+
+`docs/DATA_LIFECYCLE.md` updated: GAP-06 closed (DLQ drain endpoint added), Phase B4 RAG quality signals pipeline documented.
+
+### B7–B14 — Operations Documentation
+
+Full operational documentation suite produced:
+
+| Document | Content |
+|----------|---------|
+| `docs/DISASTER_RECOVERY.md` | RTO/RPO table, 6 failure scenario playbooks, backup schedule |
+| `docs/DEPENDENCY_FAILURE_MATRIX.md` | Extended with cost/RAG signals/DLQ admin entries |
+| `docs/CAPACITY_MODEL.md` | Extended with §11 cost capacity at 10K/day and 1M/day |
+| `docs/THREAT_MODEL.md` | Extended with 6 Phase B STRIDE entries (I7, D6 are Medium) |
+| `docs/ARCHITECTURE.md` | New — full system reference (package map, request lifecycle, persistence, resilience) |
+| `k8s/deployment.yaml` | tessera-api (2 replicas) + tessera-judge-worker with rolling update, PVC, Prometheus annotations |
+| `loadtests/locustfile.py` | Self-registering Locust users, 8:2:1:1 task mix, headless CI mode |
+| `docs/runbooks/` | 6 new runbooks: redis-failover, llm-provider-failover, index-rebuild, dlq-drain, cost-cap, rolling-restart |
+| ADR-020 | RAG quality signals as a separate record type |
+| ADR-021 | At-most-once judge queue delivery (upgrade path documented) |
+
+**Test count after Phase B:** 264 (39 added across B1–B5).
+
+### What Phase B does not establish
+
+- Locust load test results — targets are defined but no live run was executed.
+- Shadow experiment outcomes — the gate is implemented; no real A/B experiment has been run against a new index.
+- Multi-replica cost cap atomicity — `over_cap()` is advisory; D6 in the threat model notes the gap.
+- DLQ depth cap — D5 open risk; `JUDGE_DLQ_MAX_DEPTH` env var not yet implemented.
+
