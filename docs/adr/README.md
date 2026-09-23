@@ -15,5 +15,6 @@
 | [ADR-011](ADR-011.md) | Canary deployment for model version changes | Accepted |
 | [ADR-012](ADR-012.md) | LLM Deployment Governance | Accepted |
 | [ADR-014](ADR-014.md) | Circuit Breaker State Scope — In-Process Only | Accepted |
+| [ADR-016](ADR-016.md) | Per-Tenant Resource Governance via Redis Counters | Accepted |
 
 ADRs follow the [Nygard format](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions): Context, Decision, Alternatives Considered, Consequences.

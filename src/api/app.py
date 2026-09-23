@@ -176,6 +176,10 @@ class AskResponse(BaseModel):
 # Module-level singleton: one Redis connection pool shared across all requests.
 _rate_limiter = RateLimiter()
 
+# Phase 3B: per-tenant resource governor (fail-closed).
+from src.resilience.tenant_governance import TenantGovernor as _TenantGovernor
+_tenant_governor = _TenantGovernor()
+
 app = FastAPI(title="Tessera Multi-Tenant RAG API")
 
 
@@ -462,6 +466,16 @@ async def ask(
         import logging as _logging
         _logging.getLogger(__name__).warning("rate limiter error (fail-open): %s", _rl_exc)
 
+    # Phase 3B: token budget check (fail-closed; estimated tokens from question length).
+    _estimated_tokens = max(1, len(question) // 4)
+    if not _tenant_governor.check_token_budget(tenant, _estimated_tokens):
+        from fastapi.responses import JSONResponse as _JSONResponse
+        return _JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={"error": "tenant daily token budget exceeded"},
+            headers={"Retry-After": "3600"},
+        )
+
     # Phase 5: reject early when the judge queue is at capacity so the caller
     # can back off instead of piling up work the system cannot drain.
     if payload.run_eval and JUDGE_MODE == "async":
@@ -655,6 +669,15 @@ async def ask(
 
         return StreamingResponse(_sse_generator(), media_type="text/event-stream")
 
+    # Phase 3B: concurrent request limit (fail-closed).
+    if not _tenant_governor.acquire_concurrent(tenant):
+        from fastapi.responses import JSONResponse as _JSONResponse
+        return _JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"error": "tenant concurrent request limit exceeded"},
+            headers={"Retry-After": "5"},
+        )
+
     start = time.perf_counter()
     try:
         with trace_run(strategy, payload.question, tenant) as run_span:
@@ -716,11 +739,15 @@ async def ask(
         )
     except _EmbeddingUnavailable:
         from fastapi.responses import JSONResponse
+        _tenant_governor.release_concurrent(tenant)
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"error": "embedding provider unavailable", "retry_after": 30},
             headers={"Retry-After": "30"},
         )
+    except Exception:
+        _tenant_governor.release_concurrent(tenant)
+        raise
 
     usage = result.get("usage") or {"prompt": 0, "completion": 0, "total": 0}
     tokens = {
@@ -749,15 +776,19 @@ async def ask(
             "usage": usage,
             "trace": result.get("trace", []) or [],
         }
-        eval_result: dict | None = submit_judge(
-            trace_id=trace_id,
-            question=payload.question,
-            answer=result.get("answer", ""),
-            contexts=contexts,
-            evaluate_fn=evaluate_answer,
-            cache_key=_cache_key if CACHE_ENABLED else None,
-            cache_payload=_cache_payload if CACHE_ENABLED else None,
-        )
+        # Phase 3B: skip judge if tenant judge quota is exceeded.
+        if not _tenant_governor.check_judge_quota(tenant):
+            eval_result = {"status": "quota_exceeded", "reason": "tenant_judge_quota"}
+        else:
+            eval_result = submit_judge(
+                trace_id=trace_id,
+                question=payload.question,
+                answer=result.get("answer", ""),
+                contexts=contexts,
+                evaluate_fn=evaluate_answer,
+                cache_key=_cache_key if CACHE_ENABLED else None,
+                cache_payload=_cache_payload if CACHE_ENABLED else None,
+            )
         guard = None
     else:
         eval_result = result.get("eval")
@@ -825,6 +856,9 @@ async def ask(
         guard=guard,
         trace=result.get("trace", []) or [],
     )
+
+    # Phase 3B: release concurrent slot after response is fully assembled.
+    _tenant_governor.release_concurrent(tenant)
 
     return ask_response
 

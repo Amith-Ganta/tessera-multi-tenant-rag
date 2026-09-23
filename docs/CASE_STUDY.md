@@ -400,3 +400,46 @@ GAP-10 (`clear_analytics()` not exposed via API) remain documented as future enh
 | xfail converted to passing | 2 (already counted in prior phases) |
 | **Total** | **170** |
 
+---
+
+## Phase 10 — Per-Tenant Resource Governance (3B: ADR-016)
+
+To enforce multi-tenant fairness across shared infrastructure, Tessera now applies
+three Redis-backed per-tenant limiters on every `/ask` request.  All three counters
+are fail-closed: a Redis error is treated as a limit breach, preventing a degraded
+Redis cluster from bypassing tenant fairness boundaries.
+
+### Governance Axes
+
+| Axis | Redis key | Default limit | HTTP status on breach |
+|---|---|---|---|
+| Daily token budget | `tokens:<tenant>:<YYYYMMDD>` | 2 000 000 tokens/day | 429 |
+| Concurrent request limit | `concurrent:<tenant>` | 5 in-flight requests | 503 |
+| Daily judge quota | `judge_quota:<tenant>:<YYYYMMDD>` | 200 judge calls/day | eval skipped |
+
+The `TenantGovernor` class (`src/resilience/tenant_governance.py`) exposes three
+methods — `check_token_budget`, `acquire_concurrent`/`release_concurrent`, and
+`check_judge_quota` — wired at three points in the `/ask` handler.  When the judge
+quota is exceeded the judge call is silently skipped and `eval` is set to
+`{"status": "quota_exceeded", "reason": "tenant_judge_quota"}` rather than
+returning an error to the caller.
+
+All limits are overridable via environment variables (`TENANT_DAILY_TOKEN_BUDGET`,
+`TENANT_MAX_CONCURRENT`, `TENANT_DAILY_JUDGE_QUOTA`).  ADR-016 documents the
+fail-closed rationale and the design trade-offs against a fail-open approach.
+
+### Tests Added
+
+`tests/test_tenant_governance.py` — 8 tests (fakeredis, no real Redis required):
+within-budget pass, budget breach, fail-closed on Redis error, concurrent
+within-limit, concurrent limit breach, release-and-reacquire cycle, within-quota
+pass, and quota breach.
+
+### Updated Test Count
+
+| Stage | Tests |
+|---|---|
+| Pre-existing (Phases 1–9) | 180 |
+| Phase 3B tenant governance | 8 |
+| **Total** | **188** |
+

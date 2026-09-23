@@ -130,6 +130,11 @@ JUDGE_POOL_SIZE = 3
 CHECKPOINTER_BACKEND = os.environ.get("CHECKPOINTER_BACKEND", "sqlite")  # "sqlite" | "redis"
 CHECKPOINTER_TTL_SECONDS = 86400  # 24 hours
 
+# Phase 3B — Tenant resource governance (ADR-016).
+TENANT_DAILY_TOKEN_BUDGET = int(os.environ.get("TENANT_DAILY_TOKEN_BUDGET", "2000000"))
+TENANT_MAX_CONCURRENT = int(os.environ.get("TENANT_MAX_CONCURRENT", "5"))
+TENANT_DAILY_JUDGE_QUOTA = int(os.environ.get("TENANT_DAILY_JUDGE_QUOTA", "200"))
+
 # Phase 8 — Canary deployment (ADR-011).
 # Requests are hashed by tenant_id; if hash % 100 < MODEL_CANARY_PERCENT,
 # the canary model version is used instead of the default. Set to 0 to disable.
