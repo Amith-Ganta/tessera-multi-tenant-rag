@@ -38,7 +38,7 @@ Total after B1-B5: 264 (Gate B confirmed)
 | B1 | [DONE] | src/observability/cost.py, docs/COST_MODEL.md, docs/adr/ADR-018.md, tests/test_cost_observability.py (14 pass) | pending-B-commit |
 | B2 | [DONE] | queue_depth()/is_over_capacity() + tests/test_queue_dlq.py (12 pass) | pending-B-commit |
 | B3 | [DONE] | peek_dlq()/drain_dlq() + /admin/dlq endpoints + tests (12 pass combined with B2) | pending-B-commit |
-| B4 | — | RAG observability signals | — |
+| B4 | [DONE] | src/observability/rag_signals.py, tests/test_rag_signals.py (22 pass) | pending-B4-commit |
 | B5 | [DONE] | src/rag/promotion_gate.py, docs/adr/ADR-019.md, tests/test_shadow_eval.py (15 pass) | pending-B-commit |
 | B6 | — | docs/DATA_LIFECYCLE.md | — |
 | B7 | — | docs/DISASTER_RECOVERY.md | — |
