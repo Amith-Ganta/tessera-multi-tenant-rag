@@ -4,7 +4,7 @@ Four required cases:
   1. publish success → eval status is "pending"
   2. publish failure (mocked) → eval status is "unavailable"
   3. publish failure is logged at WARNING level
-  4. The 14-field AskResponse shape is unchanged
+  4. The 15-field AskResponse shape is unchanged (versions field added in 3G)
 """
 from __future__ import annotations
 
@@ -144,18 +144,17 @@ class TestPublishFailureIsLogged:
 
 
 # ---------------------------------------------------------------------------
-# Case 4 — The 14-field AskResponse shape is unchanged
+# Case 4 — The 15-field AskResponse shape is unchanged (versions added in 3G)
 # ---------------------------------------------------------------------------
 
 class TestAskResponseShapeUnchanged:
-    def test_ask_response_has_14_fields(self):
-        """AskResponse must still have exactly 14 fields after the MM-02 fix."""
+    def test_ask_response_has_15_fields(self):
+        """AskResponse must have exactly 15 fields after the 3G versions field was added."""
         from src.api.app import AskResponse
-        import inspect
 
         fields = AskResponse.model_fields
-        assert len(fields) == 14, (
-            f"AskResponse must have 14 fields, found {len(fields)}: {list(fields.keys())}"
+        assert len(fields) == 15, (
+            f"AskResponse must have 15 fields, found {len(fields)}: {list(fields.keys())}"
         )
 
     def test_eval_field_exists_and_accepts_unavailable_status(self):

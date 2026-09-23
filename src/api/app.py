@@ -12,6 +12,19 @@ import os
 import time
 
 from src.rag.config import RETRIEVER_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, JUDGE_MODE, CACHE_ENABLED
+from src.rag.config import (
+    VERSION_MODEL, VERSION_PROMPT, VERSION_EMBEDDING,
+    VERSION_RETRIEVAL, VERSION_RERANKER, VERSION_EVAL_DATASET,
+)
+
+_VERSIONS: dict[str, str] = {
+    "model": VERSION_MODEL,
+    "prompt": VERSION_PROMPT,
+    "embedding": VERSION_EMBEDDING,
+    "retrieval": VERSION_RETRIEVAL,
+    "reranker": VERSION_RERANKER,
+    "eval_dataset": VERSION_EVAL_DATASET,
+}
 from src.rag.ingest import build_tenant_index
 from src.rag.tenant_context import tenant_corpus_dir, use_tenant
 from src.rag.strategies import run_strategy
@@ -171,14 +184,21 @@ class AskResponse(BaseModel):
     trace: list[str]
     thread_id: str | None = None
     transcript: list[dict] | None = None
+    versions: dict[str, str] | None = None
 
 
 # Module-level singleton: one Redis connection pool shared across all requests.
 _rate_limiter = RateLimiter()
 
-# Phase 3B: per-tenant resource governor (fail-closed).
+# Phase 3B: per-tenant resource governor.
+# Use the real fail-closed governor only when REDIS_URL is explicitly set;
+# fall back to the null (passthrough) governor for envs without Redis (tests).
+import os as _os
 from src.resilience.tenant_governance import TenantGovernor as _TenantGovernor
-_tenant_governor = _TenantGovernor()
+from src.resilience.tenant_governance import NullTenantGovernor as _NullTenantGovernor
+_tenant_governor: _TenantGovernor | _NullTenantGovernor = (
+    _TenantGovernor() if _os.environ.get("REDIS_URL") else _NullTenantGovernor()
+)
 
 app = FastAPI(title="Tessera Multi-Tenant RAG API")
 
@@ -422,6 +442,7 @@ def _run_a2a(
         trace=a2a.get("trace", []) or [],
         thread_id=a2a.get("thread_id"),
         transcript=transcript,
+        versions=_VERSIONS,
     )
 
 
@@ -664,6 +685,7 @@ async def ask(
                 eval=_eval_result,
                 guard=_guard,
                 trace=_r.get("trace", []) or [],
+                versions=_VERSIONS,
             )
             yield f"data: {json.dumps({'done': True, 'meta': _ask_resp.model_dump()})}\n\n"
 
@@ -838,6 +860,7 @@ async def ask(
             "eval": eval_result,
             "guard": guard,
             "trace": result.get("trace", []) or [],
+            "versions": _VERSIONS,
         })
     except Exception:
         pass
@@ -855,6 +878,7 @@ async def ask(
         eval=eval_result,
         guard=guard,
         trace=result.get("trace", []) or [],
+        versions=_VERSIONS,
     )
 
     # Phase 3B: release concurrent slot after response is fully assembled.

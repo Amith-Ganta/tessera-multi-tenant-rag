@@ -135,6 +135,22 @@ TENANT_DAILY_TOKEN_BUDGET = int(os.environ.get("TENANT_DAILY_TOKEN_BUDGET", "200
 TENANT_MAX_CONCURRENT = int(os.environ.get("TENANT_MAX_CONCURRENT", "5"))
 TENANT_DAILY_JUDGE_QUOTA = int(os.environ.get("TENANT_DAILY_JUDGE_QUOTA", "200"))
 
+# Phase 3G — Version identifiers emitted in every /ask response.
+# Read from existing constants so there is a single source of truth.
+VERSION_MODEL: str = CHAT_MODEL
+VERSION_PROMPT: str = "v1"
+VERSION_EMBEDDING: str = EMBEDDING_MODEL
+VERSION_RETRIEVAL: str = f"top_k={RETRIEVER_TOP_K}"
+VERSION_RERANKER: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+VERSION_EVAL_DATASET: str = "2026-08-30"
+
+# Phase 3I — Five-threshold quality gate (ADR-017).
+MIN_MEAN_RELEVANCY = float(os.environ.get("MIN_MEAN_RELEVANCY", "0.6"))
+MIN_MEAN_CORRECTNESS = float(os.environ.get("MIN_MEAN_CORRECTNESS", "0.5"))
+LATENCY_P95_MAX_MS = float(os.environ.get("LATENCY_P95_MAX_MS", "3000.0"))
+ERROR_RATE_MAX = float(os.environ.get("ERROR_RATE_MAX", "0.05"))
+COST_PER_REQUEST_MAX_USD = float(os.environ.get("COST_PER_REQUEST_MAX_USD", "0.01"))
+
 # Phase 8 — Canary deployment (ADR-011).
 # Requests are hashed by tenant_id; if hash % 100 < MODEL_CANARY_PERCENT,
 # the canary model version is used instead of the default. Set to 0 to disable.

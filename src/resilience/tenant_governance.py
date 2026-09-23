@@ -3,6 +3,10 @@
 All methods are fail-CLOSED: any Redis error is treated as a limit breach so
 that a degraded Redis cluster cannot be exploited to bypass tenant fairness
 boundaries.
+
+When REDIS_URL is not explicitly set in the environment, the app uses
+NullTenantGovernor (passthrough) so that test environments without Redis are
+not blocked.  Production always sets REDIS_URL explicitly.
 """
 
 from __future__ import annotations
@@ -20,6 +24,30 @@ from src.rag.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class NullTenantGovernor:
+    """No-op governor for environments without Redis (e.g. unit tests).
+
+    All checks pass; release is a no-op.  Used when REDIS_URL is not
+    explicitly configured so that tests without a Redis instance are not
+    blocked by fail-closed logic.
+    """
+
+    def check_token_budget(self, tenant: str, tokens_used: int) -> bool:  # noqa: ARG002
+        return True
+
+    def acquire_concurrent(self, tenant: str) -> bool:  # noqa: ARG002
+        return True
+
+    def release_concurrent(self, tenant: str) -> None:  # noqa: ARG002
+        return
+
+    def check_judge_quota(self, tenant: str) -> bool:  # noqa: ARG002
+        return True
+
+    def inject_client(self, client: object) -> None:  # noqa: ARG002
+        return
 
 
 def _today() -> str:

@@ -111,12 +111,12 @@ class TestStreamingEndpoint:
         assert last.get("done") is True
         assert "meta" in last
 
-    def test_streaming_meta_has_all_14_fields(self):
-        """The done event's meta contains all 14 AskResponse fields."""
+    def test_streaming_meta_has_all_15_fields(self):
+        """The done event's meta contains all 15 AskResponse fields."""
         required_fields = {
             "answer", "route", "strategy", "model", "sources",
             "latency_ms", "tokens", "estimated_cost_usd", "tenant",
-            "eval", "guard", "trace", "thread_id", "transcript",
+            "eval", "guard", "trace", "thread_id", "transcript", "versions",
         }
         with TestClient(app) as client:
             token = _signup_and_login(client)
