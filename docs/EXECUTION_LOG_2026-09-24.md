@@ -51,7 +51,7 @@ Total after B1-B5: 264 (Gate B confirmed)
 | B14 | [DONE] | docs/runbooks/ — 7 files: incident-response(exists)+redis-failover+llm-provider-failover+index-rebuild+dlq-drain+cost-cap+rolling-restart | pending-B14-commit |
 | B15 | [DONE] | docs/adr/ADR-020.md (RAG quality signals record type) + docs/adr/ADR-021.md (at-most-once queue delivery) + docs/adr/README.md | pending-B15-commit |
 | B16 | [DONE] | docs/THREAT_MODEL.md (renamed from threat-model.md + Phase B additions: T5/T6/I6/I7/D6/E5 + updated Open Risks) | pending-B16-commit |
-| B17 | — | docs/ARCHITECTURE.md | — |
+| B17 | [DONE] | docs/ARCHITECTURE.md (new — full system overview, package map, request lifecycle, tenant isolation, persistence inventory, resilience, observability, strategies, ADR index, deployment) | pending-B17-commit |
 | B18 | — | docs/CASE_STUDY.md refresh | — |
 
 ## Phase C — Critical Review
