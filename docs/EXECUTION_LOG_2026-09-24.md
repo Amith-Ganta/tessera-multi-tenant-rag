@@ -41,7 +41,7 @@ Total after B1-B5: 264 (Gate B confirmed)
 | B4 | [DONE] | src/observability/rag_signals.py, tests/test_rag_signals.py (22 pass) | pending-B4-commit |
 | B5 | [DONE] | src/rag/promotion_gate.py, docs/adr/ADR-019.md, tests/test_shadow_eval.py (15 pass) | pending-B-commit |
 | B6 | [DONE] | docs/DATA_LIFECYCLE.md — GAP-06 closed, rag_signals ref added | pending-B6-commit |
-| B7 | — | docs/DISASTER_RECOVERY.md | — |
+| B7 | [DONE] | docs/DISASTER_RECOVERY.md | pending-B7-commit |
 | B8 | — | docs/DEPENDENCY_FAILURE_MATRIX.md | — |
 | B9 | — | tests/test_resilience.py | — |
 | B10 | — | loadtests/ | — |
