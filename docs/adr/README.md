@@ -21,5 +21,7 @@
 | [ADR-017](ADR-017.md) | Five-Threshold Quality Gate | Accepted |
 | [ADR-018](ADR-018.md) | Centralised Cost Observability Module | Accepted |
 | [ADR-019](ADR-019.md) | Shadow Evaluation and Fail-Closed Promotion Gate | Accepted |
+| [ADR-020](ADR-020.md) | Structured RAG Quality Signals as a Separate Observability Record Type | Accepted |
+| [ADR-021](ADR-021.md) | At-Most-Once Judge Queue Delivery | Accepted |
 
 ADRs follow the [Nygard format](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions): Context, Decision, Alternatives Considered, Consequences.
