@@ -1,0 +1,44 @@
+---
+# Tessera API Service — ClusterIP (internal)
+# Expose via an Ingress or LoadBalancer in production.
+apiVersion: v1
+kind: Service
+metadata:
+  name: tessera-api
+  namespace: tessera
+  labels:
+    app: tessera-api
+    component: api
+spec:
+  selector:
+    app: tessera-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP
+  type: ClusterIP
+---
+# Tessera API Service — LoadBalancer (external, production)
+# Uncomment and remove the ClusterIP service above when direct external access is needed.
+# Use an Ingress with TLS termination instead when a reverse proxy is available.
+#
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: tessera-api-lb
+#   namespace: tessera
+#   labels:
+#     app: tessera-api
+#     component: api
+# spec:
+#   selector:
+#     app: tessera-api
+#   ports:
+#     - name: http
+#       port: 80
+#       targetPort: 8000
+#     - name: https
+#       port: 443
+#       targetPort: 8000
+#   type: LoadBalancer

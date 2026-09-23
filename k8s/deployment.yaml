@@ -1,0 +1,166 @@
+---
+# Tessera API Deployment
+# Requires: tessera namespace, tessera-secrets Secret, tessera-config ConfigMap
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tessera-api
+  namespace: tessera
+  labels:
+    app: tessera-api
+    component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tessera-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: tessera-api
+        component: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8000"
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: tessera-api
+          image: tessera-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "8000"
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tessera-secrets
+                  key: REDIS_URL
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tessera-secrets
+                  key: OPENAI_API_KEY
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tessera-secrets
+                  key: DEEPSEEK_API_KEY
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tessera-secrets
+                  key: SECRET_KEY
+            - name: TESSERA_DAILY_SPEND_USD_CAP
+              valueFrom:
+                configMapKeyRef:
+                  name: tessera-config
+                  key: TESSERA_DAILY_SPEND_USD_CAP
+                  optional: true
+            - name: CHECKPOINTER_BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: tessera-config
+                  key: CHECKPOINTER_BACKEND
+                  optional: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: data-volume
+              mountPath: /app/data
+            - name: logs-volume
+              mountPath: /app/logs
+      volumes:
+        - name: data-volume
+          persistentVolumeClaim:
+            claimName: tessera-data-pvc
+        - name: logs-volume
+          emptyDir: {}
+---
+# Tessera Judge Worker Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tessera-judge-worker
+  namespace: tessera
+  labels:
+    app: tessera-judge-worker
+    component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tessera-judge-worker
+  template:
+    metadata:
+      labels:
+        app: tessera-judge-worker
+        component: worker
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: tessera-judge-worker
+          image: tessera-api:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "src.judge.worker"]
+          env:
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tessera-secrets
+                  key: REDIS_URL
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tessera-secrets
+                  key: OPENAI_API_KEY
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tessera-secrets
+                  key: DEEPSEEK_API_KEY
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: data-volume
+              mountPath: /app/data
+      volumes:
+        - name: data-volume
+          persistentVolumeClaim:
+            claimName: tessera-data-pvc
