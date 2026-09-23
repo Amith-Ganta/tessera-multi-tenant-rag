@@ -1,7 +1,8 @@
 # Tessera — Dependency Failure Matrix
 
 All behaviour verified against source code. File:line citations point to the
-version present in the repository after commit b872d80.
+version present in the repository after commit 04603e7 (Phase B7).
+Last updated: 2026-09-24
 
 ---
 
@@ -119,24 +120,62 @@ profiles:
 
 ---
 
+### 1.9 Cost Observability (`src/observability/cost.py`)
+
+Added Phase B1. Thread-safe in-process accumulator; no external dependency.
+
+| Question | Answer | Evidence |
+|---|---|---|
+| What happens when `TESSERA_DAILY_SPEND_USD_CAP` is not set? | `daily_cap()` returns `0.0`; `over_cap()` always returns `False`. Spend tracking still works; cap enforcement is disabled. | `src/observability/cost.py` |
+| What happens when a model name is not in `RATES`? | `estimate_usd()` returns `0.0` (unknown model → no cost recorded). No exception raised. | `src/observability/cost.py` |
+| Is the accumulator shared across replicas? | **No.** In-process only. Multi-replica deployments need an external counter (Redis / Prometheus). | `src/observability/cost.py` |
+
+---
+
+### 1.10 RAG Quality Signals (`src/observability/rag_signals.py`)
+
+Added Phase B4. Pure computation + one analytics log write; no external dependency.
+
+| Question | Answer | Evidence |
+|---|---|---|
+| What happens when `log_analytics()` raises? | Exception is caught; function returns `{}`. Never raises to the caller. | `src/observability/rag_signals.py:138-140` |
+| What happens when optional fields are omitted? | They are absent from the record. No defaults or `None` values are written. | `src/observability/rag_signals.py:98-130` |
+
+---
+
+### 1.11 DLQ Admin Endpoints (`GET /admin/dlq`, `DELETE /admin/dlq`)
+
+Added Phase B3.
+
+| Question | Answer | Evidence |
+|---|---|---|
+| What happens when Redis is unavailable at `peek_dlq` time? | Returns `[]` (empty list). Logged at ERROR level. No exception propagates to the HTTP caller. | `src/judge/redis_queue.py` |
+| What happens when Redis is unavailable at `drain_dlq` time? | Returns `0`. Logged at ERROR level. | `src/judge/redis_queue.py` |
+| What if a non-admin calls these endpoints? | HTTP 403 immediately. Admin check uses `auth.is_admin(user[1])`. | `src/api/app.py` |
+
+---
+
 ## 2. Summary Matrix
 
 | Dependency | Failure Mode | Degradation | HTTP to caller | Mitigated? |
 |---|---|---|---|---|
 | LLM provider (primary) | Timeout / 5xx | LiteLLM retries ×2, then falls back to `gpt-4o-mini` | 503 (bulkhead/circuit) or 500 | Yes — LiteLLM fallback + circuit breaker |
 | LLM provider (all) | Budget cap exceeded | `RuntimeError` on next call | 500 | Yes — hard cap |
-| OpenAI Embeddings | Network / API failure | Exception propagates, no retry | 500 | **No** — unmitigated |
+| OpenAI Embeddings | Network / API failure | Circuit breaker + sparse-only fallback | 503 `Retry-After: 30` | Yes — fixed MM-01 |
 | Chroma vectorstore | Index missing / build failure | Exception on first call | 500 | Partially — warm-up at startup |
 | Cross-encoder reranker | Load failure | Warm-up suppressed; 500 on first use | 500 | Partially — conditional skip (score > 0.90) |
 | Redis — rate limiter | Unreachable | **Fail-open** — all tenants bypass limit | 200 (unthrottled) | Partially — known, logged |
-| Redis — judge queue publish | Unreachable | Job dropped silently; eval stuck "pending" | 200 (no error surfaced) | **No** — loss is silent |
+| Redis — judge queue publish | Unreachable | `eval.status = "unavailable"` returned | 200 (honest status) | Yes — fixed MM-02 |
 | Redis — judge queue DLQ | Unreachable during DLQ push | DLQ entry lost; no trace | N/A | **No** |
+| Redis — DLQ admin endpoints | Unreachable | Returns 0 / []; logged at ERROR | 200 (degraded response) | Partially — logged |
 | Redis — checkpointer | Unreachable | Fresh workflow on every request; mid-flight state lost | 200 (degraded) | Partially — returns None, logged |
 | Bulkhead full | Semaphore exhausted | Reject immediately | 503 `Retry-After: 5` | Yes |
 | Circuit breaker OPEN | 5 consecutive LLM failures | All LLM calls blocked for 30 s | 503 `Retry-After: 30` | Yes |
 | A2A Drafter unreachable | `requests` exception | Automatic in-process fallback | 200 (degraded) | Yes |
 | A2A Judge unreachable | `requests` exception | Answer returned unverified (`passed=None`) | 200 (unverified) | Partially — never gates |
 | LangSmith | Network error / missing key | No-op; tracing silently disabled | 200 (no trace) | Yes — fully no-op |
+| Cost accumulator | N/A (in-process only) | Cap enforcement disabled when env var absent | N/A | Yes — fail-open safe |
+| RAG quality signals | `log_analytics()` raises | `record_rag_signals()` returns `{}`; no propagation | N/A | Yes — fully swallowed |
 
 ---
 
