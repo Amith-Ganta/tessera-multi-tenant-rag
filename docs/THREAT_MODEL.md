@@ -2,7 +2,7 @@
 
 **Methodology:** STRIDE (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege).  
 **Scope:** API gateway, RAG pipeline, judge queue, semantic cache, auth module, A2A agent layer.  
-**Date:** 2026-09-20. **Author:** Security audit, Phase 3.
+**Date:** 2026-09-24. **Author:** Security audit, Phase 3 + Phase B update.
 
 ---
 
@@ -27,12 +27,21 @@
     │
     ├──▶ [Semantic cache — in-process dict]
     │
-    └──▶ [Judge queue — Redis LPUSH]
-              │
-              ▼
-         [Judge worker — separate process]
-              │
-              └──▶ [DeepEval + LLM judge]
+    ├──▶ [Judge queue — Redis LPUSH / DLQ]
+    │         │
+    │         ▼
+    │    [Judge worker — separate process]
+    │         │
+    │         └──▶ [DeepEval + LLM judge]
+    │
+    ├──▶ [Cost observability — in-process accumulator → logs/analytics.jsonl]
+    │
+    └──▶ [Shadow eval + promotion gate — in-process Chroma shadow index]
+
+[Admin caller]
+    │  Bearer token (admin role)
+    ▼
+[/admin/dlq GET|DELETE, /admin/analytics]
 ```
 
 ---
@@ -104,6 +113,36 @@
 | I5 | Analytics JSONL world-readable | Set `chmod 600` in Dockerfile / entrypoint |
 | D4 | No ingest rate limit | Add per-tenant ingest queue or size cap |
 | D5 | DLQ has no cap | Add `JUDGE_DLQ_MAX_DEPTH` and alert when threshold exceeded |
+
+---
+
+## Phase B Additions (2026-09-24)
+
+### New threat entries
+
+| ID | Category | Threat | Asset | Mitigation | Residual risk |
+|----|----------|--------|-------|------------|---------------|
+| T5 | Tampering | DLQ drain by non-admin caller | Judge queue | `DELETE /admin/dlq` requires admin role; `auth.is_admin()` check returns 403 | Low |
+| T6 | Tampering | Shadow experiment results manipulation | Promotion gate | `run_shadow_experiment()` is internal only; no external write path to shadow Chroma index | Low |
+| I6 | Info Disclosure | Cost accumulator exposes spend across tenants | `TESSERA_DAILY_SPEND_USD_CAP` counter | In-process only; `/metrics` endpoint requires auth; cap is global not per-tenant — a high-spend tenant cannot inspect others' spend | Low |
+| I7 | Info Disclosure | DLQ peek leaks failed-job payloads | `GET /admin/dlq` | Admin-only endpoint; DLQ entries contain question text — restrict log retention | Medium — question text in DLQ is visible to all admins; no per-tenant DLQ isolation |
+| D6 | DoS | Cost cap bypass via rapid-fire requests before cap check | Cost observability | `over_cap()` is advisory until wired into `/ask`; parallel requests may exceed cap before check fires | Medium — cap is not atomic; multi-replica deployments have independent counters |
+| E5 | Elevation | Promotion gate override by crafting shadow eval payloads | Promotion gate | Gate is fail-closed; `compare()` returns `PromotionDecision.REJECT` if `n_samples < MIN_SHADOW_SAMPLES` | Low |
+
+### Updated Open Risks table
+
+The risks below supersede the Phase 3 table where noted and add new entries:
+
+| ID | Risk | Phase | Recommended action |
+|----|------|-------|--------------------|
+| T1 | No content type validation on ingest | Phase 3 | Add allowed MIME type whitelist (PDF, TXT, MD only) |
+| T4 | Phrase-list prompt injection filter is incomplete | Phase 3 | Add LLM-based input classifier or use a guardrails library |
+| R2 | Analytics log not tamper-evident | Phase 3 | Forward logs to external sink (S3, CloudWatch) with integrity checks |
+| I5 | Analytics JSONL world-readable | Phase 3 | Set `chmod 600` in Dockerfile / entrypoint |
+| I7 | Question text visible in DLQ to all admins | Phase B | Add per-tenant DLQ namespacing or redact payload before storage |
+| D4 | No ingest rate limit | Phase 3 | Add per-tenant ingest queue or size cap |
+| D5 | DLQ has no depth cap | Phase 3 | Add `JUDGE_DLQ_MAX_DEPTH` env var and alert when threshold exceeded |
+| D6 | Cost cap not atomic under parallel load | Phase B | Wire `over_cap()` into `/ask` with Redis INCR to make cap enforcement atomic; document in ADR-018 upgrade path |
 
 ---
 
