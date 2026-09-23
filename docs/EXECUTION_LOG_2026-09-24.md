@@ -48,7 +48,7 @@ Total after B1-B5: 264 (Gate B confirmed)
 | B11 | [DONE] | docs/CAPACITY_MODEL.md (renamed from capacity-model.md + §11 cost capacity) | pending-B11-commit |
 | B12 | [DONE] | docs/COST_MODEL.md — already created in B1 | [see B1] |
 | B13 | [DONE] | k8s/deployment.yaml + k8s/service.yaml (hpa.yaml/worker-hpa.yaml/redis-exporter.yaml existed) | pending-B13-commit |
-| B14 | — | docs/runbooks/ (8 files) | — |
+| B14 | [DONE] | docs/runbooks/ — 7 files: incident-response(exists)+redis-failover+llm-provider-failover+index-rebuild+dlq-drain+cost-cap+rolling-restart | pending-B14-commit |
 | B15 | — | new ADRs | — |
 | B16 | — | docs/THREAT_MODEL.md | — |
 | B17 | — | docs/ARCHITECTURE.md | — |
