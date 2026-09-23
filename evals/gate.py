@@ -1,4 +1,18 @@
-"""Regression gate for the latest evaluation report."""
+"""Five-threshold regression gate for the latest evaluation report (ADR-017).
+
+Returns a structured result::
+
+    {
+        "passed": bool,
+        "checks": [
+            {"name": str, "value": float | None, "threshold": float,
+             "op": "ge" | "le", "passed": bool, "skipped": bool},
+            ...
+        ]
+    }
+
+Exit code 0 on pass, 1 on fail or missing report.
+"""
 
 from __future__ import annotations
 
@@ -7,10 +21,15 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from src.rag.config import PROJECT_ROOT
+from src.rag.config import (
+    ERROR_RATE_MAX,
+    COST_PER_REQUEST_MAX_USD,
+    LATENCY_P95_MAX_MS,
+    MIN_MEAN_CORRECTNESS,
+    MIN_MEAN_RELEVANCY,
+    PROJECT_ROOT,
+)
 
-MIN_MEAN_RELEVANCY = 0.6
-MIN_MEAN_CORRECTNESS = 0.5
 LATEST_REPORT_PATH = PROJECT_ROOT / "evals" / "reports" / "latest.json"
 
 
@@ -25,36 +44,78 @@ def _load_report() -> dict[str, Any] | None:
     return data
 
 
+def _check(
+    name: str,
+    value: float | None,
+    threshold: float,
+    op: str,
+) -> dict[str, Any]:
+    if value is None:
+        return {"name": name, "value": None, "threshold": threshold,
+                "op": op, "passed": True, "skipped": True}
+    passed = (value >= threshold) if op == "ge" else (value <= threshold)
+    return {"name": name, "value": value, "threshold": threshold,
+            "op": op, "passed": passed, "skipped": False}
+
+
+def run_gate(report: dict[str, Any]) -> dict[str, Any]:
+    aggregates = report.get("aggregates") or {}
+    perf = report.get("performance") or {}
+
+    def _float(d: dict[str, Any], key: str) -> float | None:
+        v = d.get(key)
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    checks = [
+        _check("mean_relevancy",
+               _float(aggregates, "mean_relevancy"),
+               MIN_MEAN_RELEVANCY, "ge"),
+        _check("mean_correctness",
+               _float(aggregates, "mean_correctness"),
+               MIN_MEAN_CORRECTNESS, "ge"),
+        _check("latency_p95_ms",
+               _float(perf, "latency_p95_ms"),
+               LATENCY_P95_MAX_MS, "le"),
+        _check("error_rate",
+               _float(perf, "error_rate"),
+               ERROR_RATE_MAX, "le"),
+        _check("cost_per_request_usd",
+               _float(perf, "cost_per_request_usd"),
+               COST_PER_REQUEST_MAX_USD, "le"),
+    ]
+
+    all_passed = all(c["passed"] for c in checks)
+    return {"passed": all_passed, "checks": checks}
+
+
 def main() -> int:
     report = _load_report()
     if report is None:
         return 1
 
-    aggregates = report.get("aggregates")
-    if not isinstance(aggregates, dict):
-        print("Missing aggregates in latest report")
-        return 1
+    result = run_gate(report)
 
-    mean_relevancy = float(aggregates.get("mean_relevancy", 0.0) or 0.0)
-    mean_correctness = float(aggregates.get("mean_correctness", 0.0) or 0.0)
+    for c in result["checks"]:
+        if c["skipped"]:
+            print(f"SKIP {c['name']} (not in report)")
+        elif c["passed"]:
+            print(f"PASS {c['name']}={c['value']:.4f} "
+                  f"({'≥' if c['op'] == 'ge' else '≤'}{c['threshold']:.4f})")
+        else:
+            print(f"FAIL {c['name']}={c['value']:.4f} "
+                  f"({'≥' if c['op'] == 'ge' else '≤'}{c['threshold']:.4f} required)")
 
-    failed: list[str] = []
-    if mean_relevancy < MIN_MEAN_RELEVANCY:
-        failed.append(
-            f"mean_relevancy {mean_relevancy:.3f} below floor {MIN_MEAN_RELEVANCY:.3f}"
-        )
-    if mean_correctness < MIN_MEAN_CORRECTNESS:
-        failed.append(
-            f"mean_correctness {mean_correctness:.3f} below floor {MIN_MEAN_CORRECTNESS:.3f}"
-        )
+    if result["passed"]:
+        print("GATE PASSED")
+        return 0
 
-    if failed:
-        for item in failed:
-            print(item)
-        return 1
-
-    print(f"PASS mean_relevancy={mean_relevancy:.3f} mean_correctness={mean_correctness:.3f}")
-    return 0
+    print("GATE FAILED")
+    return 1
 
 
 if __name__ == "__main__":

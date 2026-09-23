@@ -441,5 +441,26 @@ pass, and quota breach.
 |---|---|
 | Pre-existing (Phases 1–9) | 180 |
 | Phase 3B tenant governance | 8 |
-| **Total** | **188** |
+| Phase 3G version field | 4 |
+| Phase 3I quality gate | 9 |
+| Phase 3F experiment runner | 2 |
+| **Total** | **203** |
+
+---
+
+## Phase 11 — Version Identifiers in /ask Response (3G)
+
+Every `/ask` response now includes a `versions` dict as the 15th field of `AskResponse`, exposing the active model, prompt version, embedding model, retrieval config, reranker, and eval dataset.  All six strings are derived at startup from constants in `src/rag/config.py` — a single source of truth.  The `NullTenantGovernor` passthrough was also introduced here, ensuring unit tests without a Redis instance are not blocked by the Phase 3B fail-closed governor.
+
+---
+
+## Phase 12 — Five-Threshold Quality Gate (3I: ADR-017)
+
+The CI evaluation gate was extended from 2 to 5 thresholds.  In addition to mean relevancy (≥ 0.6) and mean correctness (≥ 0.5), the gate now checks latency p95 (≤ 3000 ms), error rate (≤ 5 %), and cost per request (≤ $0.01).  All thresholds are env-var overridable from `src/rag/config.py`.  Fields absent from the report are marked `skipped: true` and treated as passing, allowing incremental adoption without blocking CI.  The gate returns a structured `{"passed": bool, "checks": [...]}` result consumed by CI.
+
+---
+
+## Phase 13 — Retrieval Experiment Framework (3F)
+
+A lightweight offline experiment framework was added under `experiments/`.  `ExperimentConfig` is a serialisable dataclass backed by JSON baselines (`baseline`, `high-recall`, `low-latency`).  `run_experiment()` accepts an injectable `embedder_fn` so experiments run without real API calls.  Per-query metrics (precision@k, recall@k, latency_ms) are aggregated into means.  The framework is CI-safe: it raises `RuntimeError` if invoked without an embedder_fn and no production embedder is configured.
 
