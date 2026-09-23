@@ -1,7 +1,7 @@
 # Data Lifecycle and Deletion Propagation
 
 **Tessera Multi-Tenant RAG API**  
-Last updated: 2026-09-21
+Last updated: 2026-09-24
 
 ---
 
@@ -17,7 +17,7 @@ Last updated: 2026-09-21
 | Judge results (in-process) | `JudgeStore` ring buffer (OrderedDict) | Eval run output | Ring buffer max 5 000 entries; LRU eviction | No explicit deletion | `trace_id` scoped; no tenant field in key |
 | Judge results (Redis) | Redis — key `judge:result:<tenant>:<trace_id>` | Eval run output | TTL 86 400 s (24 h) | `JudgeQueue.invalidate_by_tenant()` on tenant delete; `invalidate_judge_results_for_document()` on doc delete | Tenant-scoped key (GAP-09 closed) |
 | Judge queue jobs | Redis list — `judge:queue` | `/ask` request | Consumed on dequeue; no persistence after processing | Consumed by worker; DLQ entries persist indefinitely | No tenant isolation in queue |
-| Judge DLQ | Redis list — `judge:queue:dlq` | Failed queue jobs | **No TTL — persists indefinitely** | **NOT IMPLEMENTED** — no drain endpoint | No tenant isolation |
+| Judge DLQ | Redis list — `judge:queue:dlq` | Failed queue jobs | **No TTL — persists indefinitely** | `DELETE /admin/dlq` drains all entries; `GET /admin/dlq` peeks (admin only) | No tenant isolation |
 | Conversation checkpoints (SQLite) | `data/checkpoints.sqlite3` — `checkpoints` table | A2A workflow state | Until explicit delete after workflow completion | `SQLiteCheckpointer.delete_state(thread_id)` or `delete_tenant_checkpoints(tenant)` on tenant delete | `thread_id` scoped; tenant stored in JSON state |
 | Conversation checkpoints (Redis) | Redis — key `checkpoint:<thread_id>` | A2A workflow state | TTL 86 400 s (24 h) | `RedisCheckpointer.delete_state(thread_id)` or `delete_tenant_checkpoints(tenant)` on tenant delete | `thread_id` scoped; tenant stored in JSON state |
 | Analytics records | `logs/analytics.jsonl` (JSONL append-only) | Every `/ask` call | **No TTL — file grows unbounded** | `clear_analytics()` — **NOT EXPOSED VIA API** | `tenant` field present but file is shared |
@@ -79,6 +79,8 @@ LLM answer generation                                                       │
     ▼                                                                       │
 Analytics written                                                           │
     logs/analytics.jsonl (append)    src/rag/analytics.py                  │
+    RAG quality signals (type=rag_quality) emitted by                       │
+    src/observability/rag_signals.record_rag_signals() if called            │
     tessera_users.db:user_queries    src/auth/auth.py                      │
     │                                                                       │
     ▼                                                                       │
@@ -216,7 +218,7 @@ that do not affect current correctness.
 | GAP-03 | Document deletion does not remove judge results | **CLOSED** | `JudgeQueue.invalidate_judge_results_for_document(tenant, filename)` wired into `DELETE /documents` |
 | GAP-04 | No `DELETE /tenant` endpoint | **CLOSED** | `DELETE /tenant` removes corpus, Chroma index, cache, judge results, checkpoints, and user row |
 | GAP-05 | Analytics log and `user_queries` table grow unbounded | **DEFERRED** | No retention policy, rotation, or pruning endpoint — tracked for a future release |
-| GAP-06 | Judge DLQ has no TTL and no drain API endpoint | **DEFERRED** | Failed jobs accumulate indefinitely — tracked for a future release |
+| GAP-06 | Judge DLQ has no TTL and no drain API endpoint | **CLOSED** | `JudgeQueue.peek_dlq()` / `drain_dlq()` + `GET /admin/dlq` / `DELETE /admin/dlq` admin endpoints added in Phase B3 |
 | GAP-07 | Checkpoint deletion is not triggered by tenant deletion | **CLOSED** | `SQLiteCheckpointer.delete_tenant_checkpoints(tenant)` and `RedisCheckpointer.delete_tenant_checkpoints(tenant)` wired into `DELETE /tenant` |
 | GAP-08 | No per-document Chroma deletion | **DEFERRED** | Chroma's `delete()` API is not wired; full-index rebuild on `DELETE /documents` is sufficient for correctness |
 | GAP-09 | Judge results have no tenant field in Redis key | **CLOSED** | Redis keys are now `judge:result:<tenant>:<trace_id>`; `/eval/{trace_id}` derives tenant from authenticated user |
