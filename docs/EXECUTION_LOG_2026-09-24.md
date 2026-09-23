@@ -43,8 +43,8 @@ Total after B1-B5: 264 (Gate B confirmed)
 | B6 | [DONE] | docs/DATA_LIFECYCLE.md — GAP-06 closed, rag_signals ref added | pending-B6-commit |
 | B7 | [DONE] | docs/DISASTER_RECOVERY.md | pending-B7-commit |
 | B8 | [DONE] | docs/DEPENDENCY_FAILURE_MATRIX.md — added §1.9/1.10/1.11, updated summary matrix | pending-B8-commit |
-| B9 | — | tests/test_resilience.py | — |
-| B10 | — | loadtests/ | — |
+| B9 | [DONE] | tests/test_resilience.py — 14 pass (verify only; all B-phase resilience in dedicated files) | pending-B9B10-commit |
+| B10 | [DONE] | loadtests/locustfile.py + loadtests/README.md | pending-B9B10-commit |
 | B11 | — | docs/CAPACITY_MODEL.md | — |
 | B12 | — | docs/COST_MODEL.md | — |
 | B13 | — | k8s/ production readiness | — |
