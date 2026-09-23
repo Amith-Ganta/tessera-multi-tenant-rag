@@ -45,8 +45,8 @@ Total after B1-B5: 264 (Gate B confirmed)
 | B8 | [DONE] | docs/DEPENDENCY_FAILURE_MATRIX.md — added §1.9/1.10/1.11, updated summary matrix | pending-B8-commit |
 | B9 | [DONE] | tests/test_resilience.py — 14 pass (verify only; all B-phase resilience in dedicated files) | pending-B9B10-commit |
 | B10 | [DONE] | loadtests/locustfile.py + loadtests/README.md | pending-B9B10-commit |
-| B11 | — | docs/CAPACITY_MODEL.md | — |
-| B12 | — | docs/COST_MODEL.md | — |
+| B11 | [DONE] | docs/CAPACITY_MODEL.md (renamed from capacity-model.md + §11 cost capacity) | pending-B11-commit |
+| B12 | [DONE] | docs/COST_MODEL.md — already created in B1 | [see B1] |
 | B13 | — | k8s/ production readiness | — |
 | B14 | — | docs/runbooks/ (8 files) | — |
 | B15 | — | new ADRs | — |

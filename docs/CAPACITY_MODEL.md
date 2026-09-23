@@ -179,3 +179,54 @@ Pods at 10× = ceil(115.7 × 3.991 / 100) = ceil(46.19) = 47 pods
 **At 1.157 RPS (10× peak of 10K/day), the judge queue drain rate (0.053 jobs/sec)
 becomes the bottleneck because 3 workers processing 57-second jobs cannot keep up
 with the arrival rate, causing unbounded queue growth until the 503 capacity gate activates.**
+
+---
+
+## 11. Cost Capacity — Phase B1
+
+Token-cost estimates use the rates in `docs/COST_MODEL.md` and `src/observability/cost.py`.
+
+### 11.1 Cost per request (adaptive strategy, typical)
+
+| Component | Tokens | Rate ($/1M) | Cost ($) |
+|---|---|---|---|
+| Prompt (context + query) | ~1,500 | $0.14 (deepseek-flash) | $0.000 210 |
+| Completion | ~300 | $0.28 (deepseek-flash) | $0.000 084 |
+| Embedding (query) | ~50 | $0.020 (text-embedding-3-small) | $0.000 001 |
+| **Total per request** | — | — | **~$0.000 295** |
+
+Judge eval cost (if enabled, gpt-4o-mini):
+
+| Component | Tokens | Rate ($/1M) | Cost ($) |
+|---|---|---|---|
+| Judge prompt | ~2,000 | $0.15 | $0.000 300 |
+| Judge completion | ~200 | $0.60 | $0.000 120 |
+| **Per eval job** | — | — | **~$0.000 420** |
+
+### 11.2 Daily spend — 10K requests/day
+
+```
+Generation only:  10,000 × $0.000 295 = $2.95 / day
+With eval:        10,000 × ($0.000 295 + $0.000 420) = $7.15 / day
+```
+
+### 11.3 Daily spend — 1M requests/day
+
+```
+Generation only:  1,000,000 × $0.000 295 = $295 / day
+With eval:        1,000,000 × $0.000 715 = $715 / day
+```
+
+### 11.4 Daily cap configuration
+
+Set `TESSERA_DAILY_SPEND_USD_CAP` to hard-stop LLM calls when spend exceeds budget:
+
+```
+TESSERA_DAILY_SPEND_USD_CAP=10.00   # safe for 10K/day with eval
+TESSERA_DAILY_SPEND_USD_CAP=300.00  # safe for 1M/day generation-only
+```
+
+Cap enforcement is in-process only. Multi-replica deployments must coordinate via
+an external counter (Redis INCR) — see `docs/adr/ADR-018.md`.
+
+Last updated: 2026-09-24
