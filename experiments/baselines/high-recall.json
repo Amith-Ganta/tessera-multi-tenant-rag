@@ -1,0 +1,9 @@
+{
+  "name": "high-recall",
+  "top_k": 10,
+  "rerank_threshold": 0.70,
+  "similarity_metric": "cosine",
+  "min_context_confidence": 0.30,
+  "description": "Wider retrieval net: higher top_k and lower rerank threshold to maximise recall at the cost of precision and latency.",
+  "tags": ["recall-optimised", "experiment"]
+}

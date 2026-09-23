@@ -1,0 +1,9 @@
+{
+  "name": "low-latency",
+  "top_k": 3,
+  "rerank_threshold": 0.95,
+  "similarity_metric": "cosine",
+  "min_context_confidence": 0.60,
+  "description": "Reduced top_k and higher rerank skip threshold to minimise latency; suitable for interactive / low-SLA endpoints.",
+  "tags": ["latency-optimised", "experiment"]
+}

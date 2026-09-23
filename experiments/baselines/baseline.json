@@ -1,0 +1,9 @@
+{
+  "name": "baseline",
+  "top_k": 5,
+  "rerank_threshold": 0.90,
+  "similarity_metric": "cosine",
+  "min_context_confidence": 0.50,
+  "description": "Default retrieval configuration matching production settings.",
+  "tags": ["baseline", "production"]
+}
