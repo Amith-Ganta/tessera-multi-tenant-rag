@@ -21,12 +21,12 @@
 | [DONE] | 13 | Shadow promotion methodology — 22 tests: ShadowResult accumulation, compare() fail-closed (samples/absent metric/margin), exact boundary, negative margin, run_shadow_experiment() | TBD |
 | [DONE] | 14 | Fail-closed quality gate — 17 tests: CLI exit codes (0/1/1-missing), stdout format (PASS/FAIL/SKIP), fail-closed invariants, _load_report() round-trip | e274448 |
 | [DONE] | G2 | Phase 2 gate — 136/136 Phase 2 tests pass (items 9-14); 37 pre-existing failures unrelated to Phase 2 scope | TBD |
-| [TODO] | 15 | Chunk provenance metadata | — |
-| [TODO] | 16 | Citation correctness | — |
-| [TODO] | 17 | Document-level ACL | — |
-| [TODO] | 18 | Corpus/index version | — |
-| [TODO] | 19 | Document update consistency | — |
-| [GATE3]| G3 | Phase 3 gate | — |
+| [DONE] | 15 | Chunk provenance metadata — 16 tests: metadata contract, chunk_index, multi-chunk source, _tokenize, retrieve_sparse provenance pass-through | a2d6fb0 |
+| [DONE] | 16 | Citation correctness — 14 tests: sources/contexts shape, source matches metadata, order preserved, empty retrieval, no-source doc, dedup contract | 07b3abe |
+| [DONE] | 17 | Document-level ACL — 25 tests: path isolation, use_tenant ctx manager, restore on exit, nested ctx, tenant ID validation (fail-closed), cross-tenant path exclusion | af3ab6c |
+| [DONE] | 18 | Corpus/index version — 20 tests: all six VERSION_* constants non-empty, build_tenant_index result schema (7 keys), chunk_size/overlap match args, index_dir non-empty string | 7485866 |
+| [DONE] | 19 | Document update consistency — 11 tests: BM25 LRU cache eviction, stale-data prevention, idempotent invalidation, reset_vectorstore_cache callable (Chroma stubbed), post-upload fresh retrieval | 7e941e6 |
+| [GATE3]| G3 | Phase 3 gate | TBD |
 | [TODO] | 20 | End-to-end trace ID | — |
 | [TODO] | 21 | AI quality metrics | — |
 | [TODO] | 22 | AI capacity model | — |
