@@ -23,7 +23,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - JUDGE_QUEUE_ENABLED=true
       - RATE_LIMIT_PER_MINUTE=100
-      - CHAT_MODEL=gpt-4o-mini
+      - CHAT_MODEL=deepseek/deepseek-flash
     env_file:
       - .env
     depends_on:
