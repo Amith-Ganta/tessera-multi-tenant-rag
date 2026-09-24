@@ -81,8 +81,8 @@ class TestA2AAnalyticsVersions:
         import inspect
         from src.api import app as app_module
         source = inspect.getsource(app_module._run_a2a)
-        assert '"versions": _VERSIONS' in source or "'versions': _VERSIONS" in source, (
-            "A2A log_analytics call must include 'versions': _VERSIONS — OI-A2A-VERSIONS fix"
+        assert '"versions": _build_versions()' in source or "'versions': _build_versions()" in source, (
+            "A2A log_analytics call must include 'versions': _build_versions() — canary versioning fix"
         )
 
     def test_versions_key_in_a2a_source(self) -> None:
@@ -95,7 +95,7 @@ class TestA2AAnalyticsVersions:
         assert '"versions"' in source or "'versions'" in source, (
             "_run_a2a must pass 'versions' to log_analytics"
         )
-        # Verify it references _VERSIONS (not a hardcoded empty dict)
-        assert "_VERSIONS" in source, (
-            "_run_a2a log_analytics must reference _VERSIONS, not a literal"
+        # Verify it uses _build_versions() for per-request canary-aware versioning
+        assert "_build_versions" in source, (
+            "_run_a2a log_analytics must use _build_versions(), not a static _VERSIONS reference"
         )

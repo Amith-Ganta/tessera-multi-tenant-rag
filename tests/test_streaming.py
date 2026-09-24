@@ -95,7 +95,16 @@ class TestStreamingEndpoint:
 
     def test_streaming_response_ends_with_done_event(self):
         """Last SSE event is {done: true, meta: {...}}."""
-        with TestClient(app) as client:
+        _fake_result = {
+            "answer": "This is a summary.",
+            "route": "vector",
+            "strategy": "basic",
+            "sources": [],
+            "trace": [],
+            "usage": {"prompt": 10, "completion": 5, "total": 15},
+        }
+        with patch("src.api.app.run_strategy", return_value=_fake_result), \
+             TestClient(app) as client:
             token = _signup_and_login(client)
             resp = client.post(
                 "/ask",
@@ -118,7 +127,16 @@ class TestStreamingEndpoint:
             "latency_ms", "tokens", "estimated_cost_usd", "tenant",
             "eval", "guard", "trace", "thread_id", "transcript", "versions",
         }
-        with TestClient(app) as client:
+        _fake_result = {
+            "answer": "The system solves document retrieval.",
+            "route": "vector",
+            "strategy": "basic",
+            "sources": [],
+            "trace": [],
+            "usage": {"prompt": 10, "completion": 5, "total": 15},
+        }
+        with patch("src.api.app.run_strategy", return_value=_fake_result), \
+             TestClient(app) as client:
             token = _signup_and_login(client)
             resp = client.post(
                 "/ask",
