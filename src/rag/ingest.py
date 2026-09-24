@@ -6,18 +6,13 @@ import gc
 import shutil
 from pathlib import Path
 
-from langchain_chroma import Chroma
-from langchain_community.document_loaders import TextLoader
-from langchain_openai import OpenAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
 from .config import CHUNK_OVERLAP, CHUNK_SIZE, CORPUS_DIR, EMBEDDING_MODEL, INDEX_DIR, get_openai_api_key
 from .retriever_dense import reset_vectorstore_cache
 from .retriever_sparse import invalidate_bm25_cache
 from .tenant_context import tenant_corpus_dir, tenant_index_dir
 
 
-def _release_chroma(store: "Chroma | None") -> None:
+def _release_chroma(store) -> None:
     """Tear a Chroma store down fully so the next build on the same path is clean.
 
     Two things have to happen, in order, or repeated uploads break on Windows:
@@ -72,14 +67,18 @@ def _release_chroma(store: "Chroma | None") -> None:
 
 
 def load_documents() -> list:
+    from langchain_community.document_loaders import TextLoader  # lazy: slow import
     docs = []
     for path in sorted(CORPUS_DIR.glob("*.md")):
         docs.extend(TextLoader(str(path), encoding="utf-8").load())
     return docs
 
 
-def build_index() -> Chroma:
+def build_index():
     # Use OpenAI embeddings for a strong baseline and to mirror Project 1's setup.
+    from langchain_chroma import Chroma  # lazy: slow import chain
+    from langchain_openai import OpenAIEmbeddings  # lazy: triggers httpx/openai
+    from langchain_text_splitters import RecursiveCharacterTextSplitter  # lazy
     splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
     documents = splitter.split_documents(load_documents())
     get_openai_api_key()
@@ -96,6 +95,11 @@ def build_tenant_index(
     corpus_dir = tenant_corpus_dir(tenant_id)
     index_dir = tenant_index_dir(tenant_id)
     corpus_dir.mkdir(parents=True, exist_ok=True)
+
+    from langchain_chroma import Chroma  # lazy: slow import chain
+    from langchain_community.document_loaders import TextLoader  # lazy: slow import
+    from langchain_openai import OpenAIEmbeddings  # lazy: triggers httpx/openai
+    from langchain_text_splitters import RecursiveCharacterTextSplitter  # lazy
 
     docs = []
     # Accept both markdown and plain text so uploads of either type are indexed.

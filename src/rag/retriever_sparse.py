@@ -6,8 +6,6 @@ from functools import lru_cache
 from pathlib import Path
 
 from langchain_core.documents import Document
-from langchain_community.document_loaders import TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from rank_bm25 import BM25Okapi
 
 from .config import CHUNK_OVERLAP, CHUNK_SIZE
@@ -19,6 +17,7 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _load_source_documents(corpus_dir: str) -> list[Document]:
+    from langchain_community.document_loaders import TextLoader  # lazy: slow import
     documents: list[Document] = []
     # Accept both markdown and plain text so the sparse corpus matches what
     # build_tenant_index indexes (uploaded PDFs are converted to .txt).
@@ -29,6 +28,7 @@ def _load_source_documents(corpus_dir: str) -> list[Document]:
 
 
 def _chunk_documents(corpus_dir: str) -> list[Document]:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter  # lazy: slow import
     splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
     return splitter.split_documents(_load_source_documents(corpus_dir))
 

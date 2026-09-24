@@ -26,9 +26,6 @@ import os
 from dataclasses import dataclass
 from threading import Lock
 
-import litellm
-from litellm import completion
-
 from .config import MODEL_CANARY_PERCENT, MODEL_CANARY_VERSION
 from .models import resolve_model, MODEL_REGISTRY
 from .tenant_context import active_tenant_id
@@ -201,6 +198,7 @@ def complete(
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
 
+    from litellm import completion  # lazy: litellm import takes 30-60s cold
     from .observability import trace_llm
 
     with trace_llm(primary_id, messages) as span:
@@ -230,6 +228,7 @@ def complete_stream(
     Usage comes from the final streamed chunk (stream_options usage_delta).
     """
     from typing import Callable  # noqa: F401 — type hint only
+    from litellm import completion  # lazy: litellm import takes 30-60s cold
     _check_budget()
 
     primary_id, primary_key = resolve_model(model)

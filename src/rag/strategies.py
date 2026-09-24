@@ -8,7 +8,6 @@ import re
 import time
 
 from langchain_core.documents import Document
-from langchain_openai import OpenAIEmbeddings
 
 from .config import (
     EMBEDDING_MODEL,
@@ -488,6 +487,7 @@ def _strategy_cache(
     retries: int,
     force_route: str | None = None,
 ) -> dict:
+    from langchain_openai import OpenAIEmbeddings  # lazy: triggers httpx/openai
     embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL, api_key=get_openai_api_key())
     # Stage: embedding -- this is the one call site where the query embedding runs
     # in isolation (the semantic-cache lookup embeds the question directly). In the

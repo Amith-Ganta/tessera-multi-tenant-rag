@@ -5,14 +5,14 @@ from __future__ import annotations
 from functools import lru_cache
 
 from langchain_core.documents import Document
-from sentence_transformers import CrossEncoder
 
 
 DEFAULT_CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 
 @lru_cache(maxsize=1)
-def _get_model(model_name: str = DEFAULT_CROSS_ENCODER_MODEL) -> CrossEncoder:
+def _get_model(model_name: str = DEFAULT_CROSS_ENCODER_MODEL):
+    from sentence_transformers import CrossEncoder  # lazy: triggers torch, very slow import
     return CrossEncoder(model_name)
 
 

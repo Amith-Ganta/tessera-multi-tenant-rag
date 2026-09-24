@@ -237,16 +237,21 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _warm_reranker() -> None:
-    # Preload the cross-encoder at boot so the first question does not pay the
-    # one-time torch model load (a few seconds) inside its own request latency.
-    # The reranker caches the model, so this call primes that cache. Any failure
-    # here is non-fatal: the model will simply load lazily on first use instead.
-    try:
-        from src.rag.reranker import _get_model
+    # Run model load in a background thread so the uvicorn server socket opens
+    # immediately and the healthcheck passes while the model warms up in parallel.
+    # Loading CrossEncoder from disk takes 10-40s even with a pre-downloaded cache,
+    # which would block the server socket and fail the healthcheck start_period.
+    import threading
 
-        _get_model()
-    except Exception:
-        pass
+    def _load() -> None:
+        try:
+            from src.rag.reranker import _get_model
+
+            _get_model()
+        except Exception:
+            pass
+
+    threading.Thread(target=_load, daemon=True).start()
 
 
 @app.on_event("startup")

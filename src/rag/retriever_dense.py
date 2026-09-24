@@ -5,9 +5,6 @@ from __future__ import annotations
 import logging
 import threading
 
-from langchain_chroma import Chroma
-from langchain_openai import OpenAIEmbeddings
-
 from .config import EMBEDDING_MODEL, RETRIEVER_TOP_K, get_openai_api_key
 from .embedding_resilience import embed_with_resilience
 from .tenant_context import active_index_dir
@@ -39,12 +36,14 @@ logger = logging.getLogger(__name__)
 # calls in the same tenant context return the exact same object, while a different
 # tenant's index gets its own store. Access is guarded by a lock so that under
 # concurrency the store is still built exactly once per key.
-_VECTORSTORE_CACHE: dict[str, Chroma] = {}
+_VECTORSTORE_CACHE: dict = {}
 _VECTORSTORE_LOCK = threading.Lock()
 _CONSTRUCTED_ONCE = False
 
 
-def _build_vectorstore() -> Chroma:
+def _build_vectorstore():
+    from langchain_chroma import Chroma  # lazy: slow import chain
+    from langchain_openai import OpenAIEmbeddings  # lazy: triggers httpx/openai
     get_openai_api_key()
     embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
     return Chroma(persist_directory=str(active_index_dir()), embedding_function=embeddings)
