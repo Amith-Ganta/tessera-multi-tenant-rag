@@ -67,6 +67,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      - name: Dependency vulnerability scan (pip-audit)
+        run: uv run pip-audit --strict --progress-spinner off
+
       - name: Run regression test suite
         env:
           REDIS_URL: redis://127.0.0.1:6379

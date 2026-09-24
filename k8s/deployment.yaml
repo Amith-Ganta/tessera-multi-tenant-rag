@@ -75,20 +75,36 @@ spec:
                   name: tessera-config
                   key: CHECKPOINTER_BACKEND
                   optional: true
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 15
-            periodSeconds: 10
-            failureThreshold: 3
-          readinessProbe:
+          # startupProbe gates liveness/readiness until the app has fully started.
+          # Allows up to 120s cold-start (24 failures × 5s period) without triggering a restart.
+          startupProbe:
             httpGet:
               path: /health
               port: 8000
             initialDelaySeconds: 10
             periodSeconds: 5
+            failureThreshold: 24
+            successThreshold: 1
+          # livenessProbe: kills the pod if it becomes unresponsive after startup.
+          # Generous timing — only fires after startupProbe succeeds.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 0
+            periodSeconds: 15
+            failureThreshold: 3
+            timeoutSeconds: 5
+          # readinessProbe: gates traffic routing; tighter period, lower failure threshold.
+          # Uses /ready if available, falls back to /health if not.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 0
+            periodSeconds: 5
             failureThreshold: 2
+            timeoutSeconds: 3
           resources:
             requests:
               cpu: "250m"
@@ -150,6 +166,30 @@ spec:
                 secretKeyRef:
                   name: tessera-secrets
                   key: DEEPSEEK_API_KEY
+          # startupProbe: allow the worker up to 60s to connect to Redis.
+          startupProbe:
+            exec:
+              command: ["redis-cli", "-u", "$(REDIS_URL)", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+            successThreshold: 1
+          # livenessProbe: detect a hung worker by checking Redis is reachable.
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "-u", "$(REDIS_URL)", "ping"]
+            initialDelaySeconds: 0
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 5
+          # readinessProbe: remove worker from service endpoints until Redis is up.
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "-u", "$(REDIS_URL)", "ping"]
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            failureThreshold: 2
+            timeoutSeconds: 3
           resources:
             requests:
               cpu: "250m"
