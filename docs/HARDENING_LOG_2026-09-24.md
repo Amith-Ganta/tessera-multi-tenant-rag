@@ -13,7 +13,7 @@
 | [DONE] | 6  | Canonical LLM gateway | 7af8ccf |
 | [DONE] | 7  | Streaming semantics | 9be5bfe |
 | [DONE] | 8  | Canary model versioning | 6c172fb |
-| [GATE1]| G1 | Phase 1 gate | — |
+| [DONE] | G1 | Phase 1 gate — 327 tests pass (exit 0) | 94728ac |
 | [TODO] | 9  | Expand golden dataset | — |
 | [TODO] | 10 | Retrieval metrics | — |
 | [TODO] | 11 | Failure matrix classification | — |
