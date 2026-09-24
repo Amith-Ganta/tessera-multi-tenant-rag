@@ -17,7 +17,7 @@
 | [DONE] | 9  | Expand golden dataset — 12→20 entries, 16 schema/negative/coverage tests | 77c08ec |
 | [DONE] | 10 | Retrieval metrics — 24 unit+integration tests for P@k/R@k/aggregates | TBD |
 | [DONE] | 11 | Failure matrix classification — 27 tests: CB/bulkhead/rate-limit/queue | TBD |
-| [TODO] | 12 | Judge limitations | — |
+| [DONE] | 12 | Judge limitations — 21 edge-case tests: gate boundaries, skip-on-absent, quality signal, submit_judge MM-02 path | TBD |
 | [TODO] | 13 | Shadow promotion methodology | — |
 | [TODO] | 14 | Fail-closed quality gate | — |
 | [GATE2]| G2 | Phase 2 gate | — |
