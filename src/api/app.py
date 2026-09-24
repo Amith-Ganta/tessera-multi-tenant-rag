@@ -16,6 +16,7 @@ from src.rag.config import RETRIEVER_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, JUDGE_MOD
 from src.rag.config import (
     VERSION_MODEL, VERSION_PROMPT, VERSION_EMBEDDING,
     VERSION_RETRIEVAL, VERSION_RERANKER, VERSION_EVAL_DATASET,
+    CHAT_MODEL,
 )
 
 _VERSIONS: dict[str, str] = {
@@ -26,6 +27,20 @@ _VERSIONS: dict[str, str] = {
     "reranker": VERSION_RERANKER,
     "eval_dataset": VERSION_EVAL_DATASET,
 }
+
+
+def _build_versions() -> dict[str, str]:
+    """Return a per-request versions dict with the actually-served model name.
+
+    When canary routing is active, _select_model() may return a different model
+    than the default CHAT_MODEL.  This function evaluates that selection within
+    the current tenant context so operators see the real model in every response.
+    """
+    from src.rag.llm import select_model
+    served = select_model(CHAT_MODEL)
+    if served == VERSION_MODEL:
+        return _VERSIONS
+    return {**_VERSIONS, "model": served}
 from src.rag.ingest import build_tenant_index
 from src.rag.tenant_context import tenant_corpus_dir, use_tenant
 from src.rag.strategies import run_strategy
@@ -440,7 +455,7 @@ def _run_a2a(
             "eval": None,
             "guard": guard,
             "trace": a2a.get("trace", []) or [],
-            "versions": _VERSIONS,  # A4 fix: A2A path now includes version context
+            "versions": _build_versions(),  # A4 fix: A2A path now includes version context
         })
     except Exception:
         pass
@@ -460,7 +475,7 @@ def _run_a2a(
         trace=a2a.get("trace", []) or [],
         thread_id=a2a.get("thread_id"),
         transcript=transcript,
-        versions=_VERSIONS,
+        versions=_build_versions(),
     )
 
 
@@ -723,7 +738,7 @@ async def ask(
                 eval=_eval_result,
                 guard=_guard,
                 trace=_r.get("trace", []) or [],
-                versions=_VERSIONS,
+                versions=_build_versions(),
             )
             yield f"data: {json.dumps({'done': True, 'meta': _ask_resp.model_dump()})}\n\n"
 
@@ -899,7 +914,7 @@ async def ask(
             "eval": eval_result,
             "guard": guard,
             "trace": result.get("trace", []) or [],
-            "versions": _VERSIONS,
+            "versions": _build_versions(),
         })
     except Exception:
         pass
@@ -917,7 +932,7 @@ async def ask(
         eval=eval_result,
         guard=guard,
         trace=result.get("trace", []) or [],
-        versions=_VERSIONS,
+        versions=_build_versions(),
     )
 
     # Phase 3B: release concurrent slot after response is fully assembled.

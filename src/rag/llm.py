@@ -52,6 +52,11 @@ def _select_model(default_model: str) -> str:
         return MODEL_CANARY_VERSION
     return default_model
 
+
+# Public alias so callers can determine which model will be used for the
+# current tenant context without actually running a completion.
+select_model = _select_model
+
 # Blended per-1M-token estimates, applied to (prompt + completion).
 # These are estimates for the spend guard and analytics, not billed
 # figures. The deepseek-flash rate assumes ~5:1 input:output ratio,
