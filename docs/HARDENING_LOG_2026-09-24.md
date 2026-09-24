@@ -5,10 +5,10 @@
 
 | Status | ID | Artifact | Commit |
 |--------|----|----------|--------|
-| [WIP]  | 1  | A2A tenant authorization | — |
-| [TODO] | 2  | Stale BM25 cache | — |
-| [TODO] | 3  | Vectorstore cache + index rebuild | — |
-| [TODO] | 4  | Semantic cache correctness | — |
+| [DONE] | 1  | A2A tenant authorization | df630de |
+| [DONE] | 2  | Stale BM25 cache | b744d73 |
+| [DONE] | 3  | Vectorstore cache + index rebuild | 2840d12 |
+| [DONE] | 4  | Semantic cache correctness | 5c7f577 |
 | [TODO] | 5  | Judge feedback injection | — |
 | [TODO] | 6  | Canonical LLM gateway | — |
 | [TODO] | 7  | Streaming semantics | — |
