@@ -9,10 +9,10 @@
 | [DONE] | 2  | Stale BM25 cache | b744d73 |
 | [DONE] | 3  | Vectorstore cache + index rebuild | 2840d12 |
 | [DONE] | 4  | Semantic cache correctness | 5c7f577 |
-| [TODO] | 5  | Judge feedback injection | — |
-| [TODO] | 6  | Canonical LLM gateway | — |
-| [TODO] | 7  | Streaming semantics | — |
-| [TODO] | 8  | Canary model versioning | — |
+| [DONE] | 5  | Judge feedback injection | 4bcafed |
+| [DONE] | 6  | Canonical LLM gateway | 7af8ccf |
+| [DONE] | 7  | Streaming semantics | 9be5bfe |
+| [DONE] | 8  | Canary model versioning | 6c172fb |
 | [GATE1]| G1 | Phase 1 gate | — |
 | [TODO] | 9  | Expand golden dataset | — |
 | [TODO] | 10 | Retrieval metrics | — |
