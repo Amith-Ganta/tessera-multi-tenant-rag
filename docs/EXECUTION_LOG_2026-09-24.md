@@ -85,10 +85,15 @@ Gate C verified: 286 passed (0:08:19) — exit code 0.
 
 | ID | Status | Artifact | Commit |
 |----|--------|----------|--------|
-| E1 | [DONE] | README.md — badge updated to 264 passing | pending-E-commit |
-| E2 | [DONE] | README.md — stats line updated to 264 tests, 21 ADRs, 3 CI jobs, 7 runbooks, 11 docs | pending-E-commit |
+| E1 | [DONE] | README.md — badge updated to 264 passing | 64f69d2 |
+| E2 | [DONE] | README.md — stats line updated to 264 tests, 21 ADRs, 3 CI jobs, 7 runbooks, 11 docs | 64f69d2 |
 | E3-E8 | [SKIP] | No further doc changes required; all Phase A/B docs committed | — |
-| F1 | [WIP] | docs/SENIOR_ENGINEERING_REVIEW.md — Phase A and Phase B sections being appended | — |
+
+## Phase F — Final Senior Review
+
+| ID | Status | Artifact | Commit |
+|----|--------|----------|--------|
+| F1 | [DONE] | docs/SENIOR_ENGINEERING_REVIEW.md — Phase A, B, C, D, E sections appended; updated metrics table | pending-F-commit |
 
 ## Phase F — Final Senior Review
 
