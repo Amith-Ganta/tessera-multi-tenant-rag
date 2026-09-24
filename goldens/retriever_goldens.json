@@ -82,5 +82,61 @@
     "input": "Who is responsible for what under the shared responsibility model?",
     "expected_output": "The provider secures the underlying infrastructure, while the customer secures data and access configuration.",
     "context": "Under the shared responsibility model the cloud provider secures the underlying infrastructure while the customer remains responsible for securing their data and access configuration."
+  },
+  {
+    "id": "g13",
+    "source": "01-access-control-iam.md",
+    "input": "What is the difference between authentication and authorization?",
+    "expected_output": "Authentication verifies identity; authorization decides what that identity is allowed to do.",
+    "context": "Authentication is the process of verifying who a principal is, typically with a password or certificate. Authorization determines what actions that verified principal is permitted to take."
+  },
+  {
+    "id": "g14",
+    "source": "02-encryption-at-rest.md",
+    "input": "What happens if an encryption key is lost?",
+    "expected_output": "The encrypted data becomes permanently unreadable without the key.",
+    "context": "Encryption at rest protects data against physical media theft, but if the encryption key is lost and no backup exists, the ciphertext cannot be decrypted and the data is unrecoverable."
+  },
+  {
+    "id": "g15",
+    "source": "04-audit-logging.md",
+    "input": "What should an audit log entry contain at minimum?",
+    "expected_output": "It should record who performed an action, what action was taken, when it happened, and on which resource.",
+    "context": "A minimal audit log entry must capture the actor identity, the action taken, the resource affected, and the timestamp, so that a forensic investigation can reconstruct events."
+  },
+  {
+    "id": "g16",
+    "source": "09-secrets-management.md",
+    "input": "Why is rotating secrets regularly important?",
+    "expected_output": "It limits the damage window if a secret is compromised without the owner knowing.",
+    "context": "Regular secret rotation reduces the blast radius of a credential leak. If a secret is stolen and the owner is unaware, rotation ensures the stolen credential eventually becomes invalid."
+  },
+  {
+    "id": "g17",
+    "source": "07-soc2-trust-criteria.md",
+    "input": "Does passing a SOC 2 audit mean a system has no security vulnerabilities?",
+    "expected_output": "No. SOC 2 certifies that security controls exist and were operating at the time of the audit; it does not guarantee absence of vulnerabilities.",
+    "context": "SOC 2 is a point-in-time attestation that the audited organization had the described controls in place and operating during the audit period. It does not certify that no vulnerabilities exist, nor does it cover every possible attack surface."
+  },
+  {
+    "id": "g18",
+    "source": "05-gdpr-data-subject-rights.md",
+    "input": "Can a company refuse a GDPR erasure request?",
+    "expected_output": "Yes, in limited circumstances such as when the data is needed to fulfil a legal obligation.",
+    "context": "Under GDPR the right to erasure is not absolute. A controller may refuse when retention is necessary to comply with a legal obligation, to perform a task in the public interest, or to establish or defend legal claims."
+  },
+  {
+    "id": "g19",
+    "source": "10-kubernetes-network-policy.md",
+    "input": "What is the default Kubernetes network policy if no policy is defined?",
+    "expected_output": "By default all pods can communicate with each other; no network policy means no restrictions.",
+    "context": "When no NetworkPolicy resource selects a pod, that pod is non-isolated and accepts traffic from all sources within the cluster. An explicit default-deny policy is required to restrict traffic by default."
+  },
+  {
+    "id": "g20",
+    "source": "12-shared-responsibility-model.md",
+    "input": "If a cloud provider has an outage, who is responsible for the customer's data?",
+    "expected_output": "The provider is responsible for infrastructure availability, but the customer is responsible for designing their application to tolerate outages and for backup strategy.",
+    "context": "Under the shared responsibility model the cloud provider is responsible for the reliability of its infrastructure services. However, the customer is responsible for architecting applications for resilience, maintaining backups, and understanding that no SLA covers all failure modes."
   }
 ]

@@ -14,7 +14,7 @@
 | [DONE] | 7  | Streaming semantics | 9be5bfe |
 | [DONE] | 8  | Canary model versioning | 6c172fb |
 | [DONE] | G1 | Phase 1 gate — 327 tests pass (exit 0) | 94728ac |
-| [TODO] | 9  | Expand golden dataset | — |
+| [DONE] | 9  | Expand golden dataset — 12→20 entries, 16 schema/negative/coverage tests | TBD |
 | [TODO] | 10 | Retrieval metrics | — |
 | [TODO] | 11 | Failure matrix classification | — |
 | [TODO] | 12 | Judge limitations | — |
