@@ -28,10 +28,12 @@ RUN uv sync --frozen --no-dev
 
 EXPOSE 8000
 
-# Cold start imports torch + deepeval which takes ~16 min on this machine; 900s is honest.
-HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=900s \
+# Dependencies are already installed at build time (uv sync --frozen above).
+# --no-sync tells uv run NOT to re-run uv sync at container startup, which
+# previously caused a 40+ second cold-start and triggered healthcheck failures.
+HEALTHCHECK --interval=15s --timeout=5s --retries=3 --start-period=30s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
 
 # 4 workers: one per CPU core available on the dev machine.
 # In production this would be set by the orchestration layer.
-CMD ["uv", "run", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+CMD ["uv", "run", "--no-sync", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
