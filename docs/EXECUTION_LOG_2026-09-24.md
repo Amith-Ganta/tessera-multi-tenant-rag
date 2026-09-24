@@ -74,11 +74,11 @@ Gate C verified: 286 passed (0:08:19) — exit code 0.
 
 | ID | Status | Artifact | Commit |
 |----|--------|----------|--------|
-| D1 | [DONE] | .github/workflows/ci.yml — truffleHog secret scan step added to lint job | pending-D-commit |
-| D2 | [DONE] | .github/workflows/ci.yml — regression-tests job with Redis service container | pending-D-commit |
-| D3 | [DONE] | .github/workflows/ci.yml — REDIS_URL + TESSERA_ENV=test env in regression-tests | pending-D-commit |
-| D4 | [DONE] | .github/workflows/ci.yml — eval-gate now depends on [lint, regression-tests] | pending-D-commit |
-| D5 | [DONE] | .github/workflows/ci.yml — pytest-results artifact upload | pending-D-commit |
+| D1 | [DONE] | .github/workflows/ci.yml — truffleHog secret scan step added to lint job | f62a7c7 |
+| D2 | [DONE] | .github/workflows/ci.yml — regression-tests job with Redis service container | f62a7c7 |
+| D3 | [DONE] | .github/workflows/ci.yml — REDIS_URL + TESSERA_ENV=test env in regression-tests | f62a7c7 |
+| D4 | [DONE] | .github/workflows/ci.yml — eval-gate now depends on [lint, regression-tests] | f62a7c7 |
+| D5 | [DONE] | .github/workflows/ci.yml — pytest-results artifact upload | f62a7c7 |
 | D6 | [SKIP] | No additional test files needed; 286 passing (22 above floor) | [see bke36s08w gate] |
 
 ## Phase E — Documentation Refresh
@@ -88,6 +88,7 @@ Gate C verified: 286 passed (0:08:19) — exit code 0.
 | E1 | [DONE] | README.md — badge updated to 264 passing | pending-E-commit |
 | E2 | [DONE] | README.md — stats line updated to 264 tests, 21 ADRs, 3 CI jobs, 7 runbooks, 11 docs | pending-E-commit |
 | E3-E8 | [SKIP] | No further doc changes required; all Phase A/B docs committed | — |
+| F1 | [WIP] | docs/SENIOR_ENGINEERING_REVIEW.md — Phase A and Phase B sections being appended | — |
 
 ## Phase F — Final Senior Review
 

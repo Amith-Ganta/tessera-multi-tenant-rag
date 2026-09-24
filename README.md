@@ -7,10 +7,10 @@ change that lowers answer quality.
 
 Python · FastAPI · LangGraph · Redis · Chroma · DeepEval · Docker
 
-[![Tests](https://img.shields.io/badge/tests-129%20passing-green)](tests/)
+[![Tests](https://img.shields.io/badge/tests-264%20passing-green)](tests/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-7,498 lines across 51 modules · 129 tests · 5 ADRs · 2 CI workflows
+264 tests · 21 ADRs · 3 CI jobs · 7 runbooks · 11 docs
 
 > **A note on the diagrams.** Every diagram is Mermaid, which GitHub renders natively.
 > Where a sequence needs to show time passing it is drawn as a sequence diagram, and where
