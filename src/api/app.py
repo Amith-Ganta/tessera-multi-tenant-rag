@@ -1044,6 +1044,10 @@ async def delete_tenant(
     if index_dir.exists():
         _shutil.rmtree(index_dir, ignore_errors=True)
 
+    # 2b. BM25 sparse index cache (in-process LRU; must be evicted when corpus is wiped)
+    from src.rag.retriever_sparse import invalidate_bm25_cache as _inv_bm25
+    _inv_bm25(str(corpus_dir))
+
     # 3. Semantic cache (all entries for this tenant)
     semantic_cache.invalidate_by_tenant(tenant)
 

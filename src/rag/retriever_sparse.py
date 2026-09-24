@@ -42,6 +42,16 @@ def _build_bm25(corpus_dir: str) -> tuple[BM25Okapi | None, list[Document], list
     return BM25Okapi(tokenized), docs, tokenized
 
 
+def invalidate_bm25_cache(corpus_dir: str) -> None:
+    """Evict the BM25 index for *corpus_dir* from the LRU cache.
+
+    Must be called whenever the corpus changes (upload, document delete,
+    or full tenant delete) so the next retrieval rebuilds from the current
+    files on disk rather than returning stale results.
+    """
+    _build_bm25.cache_clear()
+
+
 def retrieve_sparse(question: str, top_k: int) -> list[Document]:
     """Return BM25-ranked documents with the same shape as dense retrieval."""
 
