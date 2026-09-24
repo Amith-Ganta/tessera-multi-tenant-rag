@@ -692,6 +692,7 @@ async def ask(
                     "sources": _chunk_ids,
                     "usage": _usage,
                     "trace": _r.get("trace", []) or [],
+                    "_tenant": tenant,
                 }
                 _eval_result = submit_judge(
                     trace_id=_trace_id,
@@ -830,6 +831,7 @@ async def ask(
             "sources": result.get("sources", []) or [],
             "usage": usage,
             "trace": result.get("trace", []) or [],
+            "_tenant": tenant,
         }
         # Phase 3B: skip judge if tenant judge quota is exceeded.
         if not _tenant_governor.check_judge_quota(tenant):
@@ -859,7 +861,7 @@ async def ask(
                 "trace": result.get("trace", []) or [],
             }
             try:
-                semantic_cache.set(_cache_key, _cache_payload)
+                semantic_cache.set_tagged(_cache_key, _cache_payload, tenant)
             except Exception:
                 pass
 
@@ -1047,6 +1049,10 @@ async def delete_tenant(
     # 2b. BM25 sparse index cache (in-process LRU; must be evicted when corpus is wiped)
     from src.rag.retriever_sparse import invalidate_bm25_cache as _inv_bm25
     _inv_bm25(str(corpus_dir))
+
+    # 2c. Dense vectorstore cache (in-process dict; must be evicted when index is wiped)
+    from src.rag.retriever_dense import reset_vectorstore_cache as _reset_vs
+    _reset_vs()
 
     # 3. Semantic cache (all entries for this tenant)
     semantic_cache.invalidate_by_tenant(tenant)

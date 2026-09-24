@@ -12,6 +12,7 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from .config import CHUNK_OVERLAP, CHUNK_SIZE, CORPUS_DIR, EMBEDDING_MODEL, INDEX_DIR, get_openai_api_key
+from .retriever_dense import reset_vectorstore_cache
 from .retriever_sparse import invalidate_bm25_cache
 from .tenant_context import tenant_corpus_dir, tenant_index_dir
 
@@ -139,6 +140,10 @@ def build_tenant_index(
     # Evict the BM25 LRU cache so the next sparse retrieval rebuilds from the
     # updated corpus on disk rather than serving stale pre-upload documents.
     invalidate_bm25_cache(str(corpus_dir))
+
+    # Evict the dense vectorstore cache so the next retrieval opens a fresh
+    # Chroma client against the newly rebuilt index rather than the pre-upload one.
+    reset_vectorstore_cache()
 
     return result
 
