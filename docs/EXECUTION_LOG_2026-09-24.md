@@ -61,14 +61,14 @@ Gate C verified: 286 passed (0:08:19) — exit code 0.
 
 | ID | Status | Artifact | Commit |
 |----|--------|----------|--------|
-| C1 | [DONE] | docs/CRITICAL_REVIEW.md §C1 — Auth & Secrets: HMAC pipeline PASS, SSRF PASS | pending-C-commit |
-| C2 | [DONE] | docs/CRITICAL_REVIEW.md §C2 — Tenant Isolation: vector store, cache, judge keys, rate limiter, governor all PASS | pending-C-commit |
-| C3 | [DONE] | docs/CRITICAL_REVIEW.md §C3 — Cost Observability: PASS with documented D6 (non-atomic cap) | pending-C-commit |
-| C4 | [DONE] | docs/CRITICAL_REVIEW.md §C4 — DLQ Admin: PASS with documented D5+I7 | pending-C-commit |
-| C5 | [DONE] | docs/CRITICAL_REVIEW.md §C5 — Shadow Eval Gate: fail-closed correctly PASS | pending-C-commit |
-| C6 | [DONE] | docs/CRITICAL_REVIEW.md §C6 — RAG Quality Signals: fail-safe PASS, join limitation documented | pending-C-commit |
-| C7 | [DONE] | docs/CRITICAL_REVIEW.md §C7 — K8s Manifests: PASS dev/staging, logs emptyDir gap noted | pending-C-commit |
-| C8 | [DONE] | docs/CRITICAL_REVIEW.md §C8 — Test Suite: 286 passed gate verified, 4 documented gaps | pending-C-commit |
+| C1 | [DONE] | docs/CRITICAL_REVIEW.md §C1 — Auth & Secrets: HMAC pipeline PASS, SSRF PASS | d892355 |
+| C2 | [DONE] | docs/CRITICAL_REVIEW.md §C2 — Tenant Isolation: vector store, cache, judge keys, rate limiter, governor all PASS | d892355 |
+| C3 | [DONE] | docs/CRITICAL_REVIEW.md §C3 — Cost Observability: PASS with documented D6 (non-atomic cap) | d892355 |
+| C4 | [DONE] | docs/CRITICAL_REVIEW.md §C4 — DLQ Admin: PASS with documented D5+I7 | d892355 |
+| C5 | [DONE] | docs/CRITICAL_REVIEW.md §C5 — Shadow Eval Gate: fail-closed correctly PASS | d892355 |
+| C6 | [DONE] | docs/CRITICAL_REVIEW.md §C6 — RAG Quality Signals: fail-safe PASS, join limitation documented | d892355 |
+| C7 | [DONE] | docs/CRITICAL_REVIEW.md §C7 — K8s Manifests: PASS dev/staging, logs emptyDir gap noted | d892355 |
+| C8 | [DONE] | docs/CRITICAL_REVIEW.md §C8 — Test Suite: 286 passed gate verified, 4 documented gaps | d892355 |
 
 ## Phase D — Testing Expansion
 
@@ -94,12 +94,6 @@ Gate C verified: 286 passed (0:08:19) — exit code 0.
 | ID | Status | Artifact | Commit |
 |----|--------|----------|--------|
 | F1 | [DONE] | docs/SENIOR_ENGINEERING_REVIEW.md — Phase A, B, C, D, E sections appended; updated metrics table | 1b3b97e |
-
-## Phase F — Final Senior Review
-
-| ID | Status | Artifact | Commit |
-|----|--------|----------|--------|
-| F1 | [WIP] | docs/SENIOR_ENGINEERING_REVIEW.md — appending Phase A and Phase B sections | — |
 
 ## SECRETS_FOUND
 (none)

@@ -7,7 +7,7 @@ change that lowers answer quality.
 
 Python · FastAPI · LangGraph · Redis · Chroma · DeepEval · Docker
 
-[![Tests](https://img.shields.io/badge/tests-264%20passing-green)](tests/)
+[![Tests](https://img.shields.io/badge/tests-286%20passing-green)](tests/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 264 tests · 21 ADRs · 3 CI jobs · 7 runbooks · 11 docs
@@ -484,7 +484,7 @@ would need revisiting.
 
 ```mermaid
 flowchart LR
-    PR[Pull request] --> T[129 unit tests]
+    PR[Pull request] --> T[286 unit tests]
     T --> D[DeepEval: 12 goldens, gpt-4o-mini judge]
     D --> G{mean relevancy 0.6 floor<br/>mean correctness 0.5 floor}
     G -->|pass| M[Merge allowed]
@@ -516,7 +516,7 @@ measurement, and the fix is a router change, not a threshold change.
 
 | Measurement | Result | Source |
 |---|---|---|
-| Unit and integration tests | 129 passed, 0 errors | `tests/` |
+| Unit and integration tests | 286 passed, 0 errors | `tests/` |
 | `vector_retrieval` p50, after fix | 4 ms (from 3,696 ms) | `docs/CASE_STUDY.md` |
 | Client round-trip mean | 6,044 ms (from 10,318 ms) | `docs/CASE_STUDY.md` |
 | LLM generation p50 / p95 | 2,943 ms / 3,965 ms | `docs/CASE_STUDY.md` |
@@ -677,7 +677,7 @@ waiting to be done.
 │   ├── resilience/     # rate limiter, circuit breaker, bulkhead
 │   ├── security/       # async PBKDF2 thread pool
 │   └── ui/             # Streamlit frontend
-├── tests/              # 129 tests passing (see `uv run python -m pytest tests/ -q`)
+├── tests/              # 286 tests passing (see `uv run python -m pytest tests/ -q`)
 ├── evals/              # DeepEval harness, gate script, committed reports
 ├── goldens/            # 12 golden question-answer pairs
 ├── loadtest/           # Locust file, CSVs, comparison writeup
