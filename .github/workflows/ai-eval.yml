@@ -1,0 +1,96 @@
+# AI-affecting change detection and evaluation gate (DevOps §10).
+#
+# This workflow fires when any file that influences AI behaviour changes:
+# prompts, model selection, embedding, chunking, retrieval, reranker,
+# context selection, generation parameters, or evaluation configuration.
+#
+# It runs the same quality gate as the main CI eval-gate job but is
+# triggered independently so AI changes can never bypass the gate even
+# on targeted PRs that do not touch unrelated code paths.
+#
+# Requires repository secrets: DEEPSEEK_API_KEY, OPENAI_API_KEY.
+
+name: AI Eval Gate
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      # Prompt and generation
+      - "src/rag/generator.py"
+      # Model routing and canary selection
+      - "src/rag/llm.py"
+      # Embedding model
+      - "src/rag/embedding*.py"
+      # Chunking / ingestion
+      - "src/rag/ingest.py"
+      # Retrieval (dense + sparse + reranker)
+      - "src/rag/retriever_dense.py"
+      - "src/rag/retriever_sparse.py"
+      - "src/rag/reranker.py"
+      # Strategy / context selection
+      - "src/rag/strategies.py"
+      # Evaluation configuration and goldens
+      - "evals/**"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/rag/generator.py"
+      - "src/rag/llm.py"
+      - "src/rag/embedding*.py"
+      - "src/rag/ingest.py"
+      - "src/rag/retriever_dense.py"
+      - "src/rag/retriever_sparse.py"
+      - "src/rag/reranker.py"
+      - "src/rag/strategies.py"
+      - "evals/**"
+
+jobs:
+  ai-eval-gate:
+    runs-on: ubuntu-latest
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Verify secrets
+        shell: bash
+        run: |
+          if [ -z "${DEEPSEEK_API_KEY}" ]; then
+            echo "DEEPSEEK_API_KEY is required for ai-eval-gate and is missing."
+            exit 1
+          fi
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "OPENAI_API_KEY is required for ai-eval-gate and is missing."
+            exit 1
+          fi
+
+      - name: Run eval harness
+        run: uv run python -m evals.run_eval
+
+      - name: Run quality gate
+        run: uv run python -m evals.gate
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-eval-report
+          path: evals/reports/latest.json
