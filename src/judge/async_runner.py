@@ -60,7 +60,11 @@ async def _run_judge(
                 from src.rag.config import CACHE_ENABLED
                 if CACHE_ENABLED:
                     from src.cache.semantic_cache import semantic_cache
-                    semantic_cache.set(cache_key, cache_payload)
+                    _tenant = cache_payload.get("_tenant", "")
+                    if _tenant:
+                        semantic_cache.set_tagged(cache_key, cache_payload, _tenant)
+                    else:
+                        semantic_cache.set(cache_key, cache_payload)
             except Exception:
                 pass
     except Exception:
