@@ -93,7 +93,7 @@ Gate C verified: 286 passed (0:08:19) — exit code 0.
 
 | ID | Status | Artifact | Commit |
 |----|--------|----------|--------|
-| F1 | [DONE] | docs/SENIOR_ENGINEERING_REVIEW.md — Phase A, B, C, D, E sections appended; updated metrics table | pending-F-commit |
+| F1 | [DONE] | docs/SENIOR_ENGINEERING_REVIEW.md — Phase A, B, C, D, E sections appended; updated metrics table | 1b3b97e |
 
 ## Phase F — Final Senior Review
 
