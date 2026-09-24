@@ -16,11 +16,42 @@ is required.
 
 from __future__ import annotations
 
+import importlib
 import shutil
+import sys
 import types
 from pathlib import Path
 
 import pytest
+
+
+# ---------------------------------------------------------------------------
+# Isolation fixture — ensure the real langchain_chroma is used in this file.
+#
+# Several other test modules inject a sys.modules stub for langchain_chroma at
+# import time (via sys.modules.setdefault).  When pytest collects those modules
+# first, the stub stays in sys.modules and any subsequent "from langchain_chroma
+# import Chroma" returns MagicMock instead of the real class, causing
+# Chroma.from_documents to write nothing to disk.
+#
+# This autouse fixture saves the current sys.modules entry, replaces it with
+# the real package (force-reloaded), and restores the stub after each test so
+# other files that expect the stub are unaffected.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _use_real_langchain_chroma():
+    _saved = sys.modules.get("langchain_chroma")
+    # Remove any stub so importlib.import_module picks up the real package.
+    sys.modules.pop("langchain_chroma", None)
+    real_mod = importlib.import_module("langchain_chroma")
+    sys.modules["langchain_chroma"] = real_mod
+    yield
+    # Restore whatever was there before (stub or nothing).
+    if _saved is None:
+        sys.modules.pop("langchain_chroma", None)
+    else:
+        sys.modules["langchain_chroma"] = _saved
 
 
 # ---------------------------------------------------------------------------
