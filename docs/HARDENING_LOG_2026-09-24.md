@@ -17,8 +17,8 @@
 | [DONE] | 9  | Expand golden dataset — 12→20 entries, 16 schema/negative/coverage tests | 77c08ec |
 | [DONE] | 10 | Retrieval metrics — 24 unit+integration tests for P@k/R@k/aggregates | TBD |
 | [DONE] | 11 | Failure matrix classification — 27 tests: CB/bulkhead/rate-limit/queue | TBD |
-| [DONE] | 12 | Judge limitations — 21 edge-case tests: gate boundaries, skip-on-absent, quality signal, submit_judge MM-02 path | TBD |
-| [TODO] | 13 | Shadow promotion methodology | — |
+| [DONE] | 12 | Judge limitations — 21 edge-case tests: gate boundaries, skip-on-absent, quality signal, submit_judge MM-02 path | f84487f |
+| [DONE] | 13 | Shadow promotion methodology — 22 tests: ShadowResult accumulation, compare() fail-closed (samples/absent metric/margin), exact boundary, negative margin, run_shadow_experiment() | TBD |
 | [TODO] | 14 | Fail-closed quality gate | — |
 | [GATE2]| G2 | Phase 2 gate | — |
 | [TODO] | 15 | Chunk provenance metadata | — |
