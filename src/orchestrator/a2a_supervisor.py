@@ -24,6 +24,7 @@ from typing import Any
 
 import requests
 
+from src.auth.service_auth import SERVICE_AUTH_HEADER, get_service_token
 from src.rag.checkpointer import SQLiteCheckpointer
 from src.state.redis_checkpointer import checkpointer_factory
 from src.rag.config import RETRIEVER_TOP_K
@@ -60,7 +61,13 @@ class A2AJsonRpcClient:
                 }
             },
         }
-        response = requests.post(f"{self.base_url}/", json=payload, timeout=self.timeout)
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        token = get_service_token()
+        if token:
+            headers[SERVICE_AUTH_HEADER] = token
+        response = requests.post(
+            f"{self.base_url}/", json=payload, headers=headers, timeout=self.timeout
+        )
         response.raise_for_status()
         body = response.json()
         if body.get("error"):

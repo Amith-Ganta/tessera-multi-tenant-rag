@@ -23,9 +23,15 @@ import json
 import uuid
 from typing import Any, Callable
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
+
+from src.auth.service_auth import SERVICE_AUTH_HEADER, verify_service_token
+
+_log = logging.getLogger(__name__)
 
 
 def build_agent_card(
@@ -139,13 +145,23 @@ def make_a2a_app(
     skill_name: str,
     skill_description: str,
     handler: Callable[[dict], dict],
+    authenticate: bool = True,
 ) -> FastAPI:
     """Build a FastAPI A2A server exposing AgentCard + JSON-RPC ``message/send``.
 
     ``handler`` is a synchronous callable that receives the skill parameters
     (from ``message.metadata``) and returns the skill result dict. It runs in a
     threadpool so a slow generation never blocks the event loop.
+
+    When ``authenticate=True`` (the default) the agent requires the caller to
+    supply a valid ``X-Tessera-Service-Token`` header.  The token is read from
+    the ``TESSERA_A2A_SERVICE_TOKEN`` environment variable at request time.
+    When that env var is not set the check is skipped (dev / test mode) and a
+    warning is emitted.  Pass ``authenticate=False`` only in unit tests that
+    deliberately test the unauthenticated code path.
     """
+    from src.auth.service_auth import get_service_token as _get_token
+
     app = FastAPI(title=name, version="1.0.0")
     card = build_agent_card(
         name, description, url, skill_id, skill_name, skill_description
@@ -163,6 +179,27 @@ def make_a2a_app(
     async def jsonrpc(request: Request) -> Any:
         # Returns either a JSON-RPC result dict or a JSON-RPC error response, so
         # no single Pydantic response model applies (response_model=None).
+
+        if authenticate:
+            token = _get_token()
+            if token is not None:
+                provided = request.headers.get(SERVICE_AUTH_HEADER)
+                if not verify_service_token(provided):
+                    _log.warning(
+                        "A2A service auth failed for agent '%s' — missing or invalid %s",
+                        name,
+                        SERVICE_AUTH_HEADER,
+                    )
+                    return JSONResponse(
+                        status_code=401,
+                        content={"error": "service authentication required"},
+                    )
+            else:
+                _log.warning(
+                    "TESSERA_A2A_SERVICE_TOKEN not set — agent '%s' running without service auth",
+                    name,
+                )
+
         body = await request.json()
         req_id = body.get("id")
         method = body.get("method")
