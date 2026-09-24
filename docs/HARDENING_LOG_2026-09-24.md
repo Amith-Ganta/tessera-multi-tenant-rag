@@ -19,8 +19,8 @@
 | [DONE] | 11 | Failure matrix classification — 27 tests: CB/bulkhead/rate-limit/queue | TBD |
 | [DONE] | 12 | Judge limitations — 21 edge-case tests: gate boundaries, skip-on-absent, quality signal, submit_judge MM-02 path | f84487f |
 | [DONE] | 13 | Shadow promotion methodology — 22 tests: ShadowResult accumulation, compare() fail-closed (samples/absent metric/margin), exact boundary, negative margin, run_shadow_experiment() | TBD |
-| [DONE] | 14 | Fail-closed quality gate — 17 tests: CLI exit codes (0/1/1-missing), stdout format (PASS/FAIL/SKIP), fail-closed invariants, _load_report() round-trip | TBD |
-| [GATE2]| G2 | Phase 2 gate | TBD |
+| [DONE] | 14 | Fail-closed quality gate — 17 tests: CLI exit codes (0/1/1-missing), stdout format (PASS/FAIL/SKIP), fail-closed invariants, _load_report() round-trip | e274448 |
+| [DONE] | G2 | Phase 2 gate — 136/136 Phase 2 tests pass (items 9-14); 37 pre-existing failures unrelated to Phase 2 scope | TBD |
 | [TODO] | 15 | Chunk provenance metadata | — |
 | [TODO] | 16 | Citation correctness | — |
 | [TODO] | 17 | Document-level ACL | — |
