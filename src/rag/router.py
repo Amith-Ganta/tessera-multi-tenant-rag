@@ -8,10 +8,10 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.request import Request, urlopen
 
-from litellm import completion
 from langchain_core.documents import Document
 
-from .config import CHAT_MODEL, RETRIEVER_TOP_K, get_chat_api_key, get_tavily_api_key
+from .config import CHAT_MODEL, RETRIEVER_TOP_K, get_tavily_api_key
+from .llm import complete as llm_complete
 
 
 @dataclass(frozen=True)
@@ -116,15 +116,8 @@ def _classify_once(question: str) -> dict[str, Any]:
         },
         {"role": "user", "content": question},
     ]
-    response = completion(
-        model=CHAT_MODEL,
-        messages=messages,
-        api_key=get_chat_api_key(),
-        temperature=0,
-        response_format={"type": "json_object"},
-    )
-    content = response.choices[0].message.content or "{}"
-    return _safe_parse_json(content)
+    content, _usage = llm_complete(CHAT_MODEL, messages, json_mode=True)
+    return _safe_parse_json(content or "{}")
 
 
 def route_query(question: str) -> RoutingDecision:

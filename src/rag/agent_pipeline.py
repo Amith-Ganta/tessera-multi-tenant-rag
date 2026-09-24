@@ -6,10 +6,10 @@ import json
 import sys
 from typing import Any
 
-from litellm import completion
 from langchain_core.documents import Document
 
-from .config import CHAT_MODEL, RETRIEVER_TOP_K, get_chat_api_key
+from .config import CHAT_MODEL, RETRIEVER_TOP_K
+from .llm import complete as llm_complete
 from .reranker import rerank
 from .retriever_hybrid import retrieve_hybrid
 from .router import route_query, tavily_search
@@ -64,13 +64,7 @@ def _generate(question: str, contexts: list[Document], feedback: str | None = No
         {"role": "system", "content": system_content},
         {"role": "user", "content": f"Question: {question}\n\nContext:\n{context_text}"},
     ]
-    response = completion(
-        model=CHAT_MODEL,
-        messages=messages,
-        api_key=get_chat_api_key(),
-        temperature=0,
-    )
-    return response.choices[0].message.content or "", _usage_dict(response)
+    return llm_complete(CHAT_MODEL, messages)
 
 
 def _self_check(question: str, answer: str, contexts: list[Document]) -> tuple[dict[str, Any], dict[str, int]]:
@@ -85,15 +79,8 @@ def _self_check(question: str, answer: str, contexts: list[Document]) -> tuple[d
         },
         {"role": "user", "content": f"Question: {question}\n\nAnswer: {answer}\n\nContext: {context_text}"},
     ]
-    response = completion(
-        model=CHAT_MODEL,
-        messages=messages,
-        api_key=get_chat_api_key(),
-        temperature=0,
-        response_format={"type": "json_object"},
-    )
-    content = response.choices[0].message.content or "{}"
-    return _safe_parse_json(content), _usage_dict(response)
+    content, usage = llm_complete(CHAT_MODEL, messages, json_mode=True)
+    return _safe_parse_json(content or "{}"), usage
 
 
 def _run_self_check(question: str, answer: str, contexts: list[Document]) -> tuple[bool, bool, str, dict[str, int]]:
