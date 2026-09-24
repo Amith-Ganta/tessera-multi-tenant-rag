@@ -644,8 +644,8 @@ async def ask(
             try:
                 result_dict = _run_strategy_sync(on_token=_on_token_callback)
                 _result_holder.append(result_dict)
-            except Exception:  # noqa: BLE001
-                _result_holder.append({})
+            except Exception as _exc:  # noqa: BLE001
+                _result_holder.append({"_stream_error": str(_exc) or "internal error"})
             finally:
                 _sync_q.put(_sentinel)  # always signal end regardless of error
 
@@ -669,6 +669,10 @@ async def ask(
 
             # Thread has finished; assemble full response and emit done event.
             _r = _result_holder[0] if _result_holder else {}
+            _stream_error = _r.pop("_stream_error", None)
+            if _stream_error:
+                yield f"data: {json.dumps({'error': _stream_error})}\n\n"
+                return
             _latency_ms = (time.perf_counter() - _sse_start) * 1000
             _usage = _r.get("usage") or {"prompt": 0, "completion": 0, "total": 0}
             _tokens = {
