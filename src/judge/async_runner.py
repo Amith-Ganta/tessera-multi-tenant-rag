@@ -25,6 +25,44 @@ from .judge_store import judge_store
 
 logger = logging.getLogger(__name__)
 
+_QUALITY_SIGNAL_METRICS = frozenset({"faithfulness", "answer_relevancy", "correctness"})
+
+
+def _emit_judge_quality_signal(trace_id: str, result: dict) -> None:
+    """Write a quality signal to analytics when any key metric fails its threshold.
+
+    Called after every successful judge run so operators can detect quality
+    drift without polling judge_store.  Never raises — analytics failure must
+    not affect the caller.
+    """
+    try:
+        metrics: dict = result.get("metrics", {})
+        if not metrics:
+            return
+        failed = {
+            name: {
+                "score": m.get("score"),
+                "threshold": m.get("threshold"),
+                "reason": m.get("reason"),
+            }
+            for name, m in metrics.items()
+            if name in _QUALITY_SIGNAL_METRICS
+            and isinstance(m, dict)
+            and m.get("passed") is False
+        }
+        if not failed:
+            return
+        from src.rag.analytics import log_analytics
+        import datetime
+        log_analytics({
+            "event": "judge_quality_fail",
+            "trace_id": trace_id,
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "failed_metrics": failed,
+        })
+    except Exception:
+        pass
+
 # Tracks jobs published to the queue in the current process lifetime.
 # Replaces the Phase 4a in-process active-task counter.
 _published_judges = 0
@@ -54,6 +92,9 @@ async def _run_judge(
         result["status"] = "done"
         judge_store.set_result(trace_id, result)
         logger.info("in-proc judge done trace_id=%s", trace_id)
+
+        # Feed judge scores back into analytics so quality drift is observable.
+        _emit_judge_quality_signal(trace_id, result)
 
         if cache_key and cache_payload is not None:
             try:
