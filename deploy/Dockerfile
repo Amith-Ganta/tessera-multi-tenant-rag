@@ -28,12 +28,18 @@ RUN uv sync --frozen --no-dev
 
 EXPOSE 8000
 
+# Pre-download the cross-encoder reranker model at build time so container startup
+# is fast. Without this, the _warm_reranker startup event downloads the model on
+# first boot (~30-60s), which exceeds the healthcheck start_period.
+# The model is cached in HuggingFace's default cache dir (~/.cache/huggingface).
+RUN uv run --no-sync python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
+
 # Dependencies are already installed at build time (uv sync --frozen above).
 # --no-sync tells uv run NOT to re-run uv sync at container startup, which
 # previously caused a 40+ second cold-start and triggered healthcheck failures.
 HEALTHCHECK --interval=15s --timeout=5s --retries=3 --start-period=30s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
 
-# 4 workers: one per CPU core available on the dev machine.
-# In production this would be set by the orchestration layer.
-CMD ["uv", "run", "--no-sync", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Single-worker mode: multiprocessing in containers adds
+# complexity without portfolio value for this project.
+CMD ["uv", "run", "--no-sync", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
