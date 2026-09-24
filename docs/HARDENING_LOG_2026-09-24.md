@@ -26,13 +26,13 @@
 | [DONE] | 17 | Document-level ACL — 25 tests: path isolation, use_tenant ctx manager, restore on exit, nested ctx, tenant ID validation (fail-closed), cross-tenant path exclusion | af3ab6c |
 | [DONE] | 18 | Corpus/index version — 20 tests: all six VERSION_* constants non-empty, build_tenant_index result schema (7 keys), chunk_size/overlap match args, index_dir non-empty string | 7485866 |
 | [DONE] | 19 | Document update consistency — 11 tests: BM25 LRU cache eviction, stale-data prevention, idempotent invalidation, reset_vectorstore_cache callable (Chroma stubbed), post-upload fresh retrieval | 7e941e6 |
-| [GATE3]| G3 | Phase 3 gate | TBD |
-| [TODO] | 20 | End-to-end trace ID | — |
-| [TODO] | 21 | AI quality metrics | — |
-| [TODO] | 22 | AI capacity model | — |
-| [TODO] | 23 | Bottleneck statement | — |
-| [GATE4]| G4 | Phase 4 gate | — |
-| [TODO] | 24 | Architecture review | — |
-| [TODO] | 25 | Documentation consistency | — |
-| [GATE5]| G5 | Phase 5 gate | — |
-| [TODO] | F  | Final hardening report | — |
+| [DONE] | G3 | Phase 3 gate — 86/86 Phase 3 tests pass | 4f59b24 |
+| [DONE] | 20 | End-to-end trace ID — 15 tests: submit_judge contract, judge_store persistence, emit quality signal trace_id | 5a5947e |
+| [DONE] | 21 | AI quality metrics — 31 tests: _safe_stats, _eval_summary pass_rate/status, record_rag_signals assembly+emit | f5c8654 |
+| [DONE] | 22 | AI capacity model — 27 tests: RATES table, estimate_usd, spend accumulator, daily_cap/over_cap, thread safety | 61623b4 |
+| [DONE] | 23 | Bottleneck statement — 24 tests: Stage enum, ALL_STAGES, coerce_stage, LatencyStore record/snapshot/reset, thread safety | 7b9074d |
+| [DONE] | G4 | Phase 4 gate — 97/97 Phase 4 tests pass | 967d305 |
+| [DONE] | 24 | Architecture review — 38 tests: config invariants, version IDs, quality gate thresholds, tenant governance constants, resilience layer imports, observability callables, judge result contract | c66466a |
+| [DONE] | 25 | Documentation consistency — 36 tests: AskResponse 15 fields (AST), 11 packages/11 key files exist, Stage enum matches ARCHITECTURE.md, default model, RATES table, capacity config | bcb7481 |
+| [DONE] | G5 | Phase 5 gate — 74/74 Phase 5 tests pass | 18b339c |
+| [DONE] | F  | Final hardening report — see docs/HARDENING_REPORT_2026-09-24.md | TBD |
