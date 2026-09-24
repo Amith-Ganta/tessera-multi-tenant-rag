@@ -1,16 +1,26 @@
 from __future__ import annotations
 
-from deepeval.metrics import (
-    FaithfulnessMetric,
-    AnswerRelevancyMetric,
-    ContextualPrecisionMetric,
-    ContextualRecallMetric,
-    ContextualRelevancyMetric,
-    ToxicityMetric,
-    GEval,
-)
-from deepeval.test_case import LLMTestCase, LLMTestCaseParams
-from deepeval.models import OpenAIModel
+# deepeval is a dev/test dependency — it is NOT installed in the production image
+# (uv sync --no-dev). Wrap the import so the module loads cleanly in production;
+# evaluate_answer() degrades to {"enabled": False} when deepeval is absent.
+try:
+    from deepeval.metrics import (
+        FaithfulnessMetric,
+        AnswerRelevancyMetric,
+        ContextualPrecisionMetric,
+        ContextualRecallMetric,
+        ContextualRelevancyMetric,
+        ToxicityMetric,
+        GEval,
+    )
+    from deepeval.test_case import LLMTestCase, LLMTestCaseParams
+    from deepeval.models import OpenAIModel
+    _DEEPEVAL_AVAILABLE = True
+except ModuleNotFoundError:
+    _DEEPEVAL_AVAILABLE = False
+    FaithfulnessMetric = AnswerRelevancyMetric = ContextualPrecisionMetric = None  # type: ignore[assignment]
+    ContextualRecallMetric = ContextualRelevancyMetric = ToxicityMetric = GEval = None  # type: ignore[assignment]
+    LLMTestCase = LLMTestCaseParams = OpenAIModel = None  # type: ignore[assignment]
 
 from .config import get_openai_api_key
 
@@ -41,9 +51,11 @@ _TOXICITY_THRESHOLD = 0.5
 _CORRECTNESS_THRESHOLD = 0.7
 
 
-def _judge() -> OpenAIModel | None:
+def _judge():
     global _JUDGE, _JUDGE_ATTEMPTED
 
+    if not _DEEPEVAL_AVAILABLE:
+        return None
     if not _JUDGE_ATTEMPTED:
         _JUDGE_ATTEMPTED = True
         try:
@@ -73,6 +85,8 @@ def _run_metric(metrics: dict[str, dict], name: str, builder, case: LLMTestCase,
 
 
 def evaluate_answer(question: str, answer: str, contexts: list[str], expected_output: str | None = None) -> dict:
+    if not _DEEPEVAL_AVAILABLE:
+        return {"enabled": False, "reason": "deepeval not installed", "metrics": {}}
     judge = _judge()
     if judge is None:
         return {"enabled": False, "reason": "judge unavailable", "metrics": {}}
