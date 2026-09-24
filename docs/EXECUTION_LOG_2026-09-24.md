@@ -79,7 +79,7 @@ Gate C verified: 286 passed (0:08:19) — exit code 0.
 | D3 | [DONE] | .github/workflows/ci.yml — REDIS_URL + TESSERA_ENV=test env in regression-tests | pending-D-commit |
 | D4 | [DONE] | .github/workflows/ci.yml — eval-gate now depends on [lint, regression-tests] | pending-D-commit |
 | D5 | [DONE] | .github/workflows/ci.yml — pytest-results artifact upload | pending-D-commit |
-| D6 | [SKIP] | No additional test files needed; 286 passing (22 above floor) | — |
+| D6 | [SKIP] | No additional test files needed; 286 passing (22 above floor) | [see bke36s08w gate] |
 
 ## Phase E — Documentation Refresh
 
