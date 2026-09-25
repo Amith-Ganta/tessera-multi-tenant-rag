@@ -9,9 +9,17 @@ stubbed so no real key is required.
 
 from __future__ import annotations
 
+import sys
 import threading
+import types
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+# Stub langchain_chroma before any src.rag imports (not installed in test env).
+_stub_chroma = types.ModuleType("langchain_chroma")
+_stub_chroma.Chroma = MagicMock()
+sys.modules.setdefault("langchain_chroma", _stub_chroma)
 
 import src.rag.retriever_dense as rd
 
@@ -35,6 +43,8 @@ class _FakeChroma:
 @pytest.fixture(autouse=True)
 def _isolate_cache(monkeypatch):
     """Reset the cache before and after each test, and stub the API key check."""
+    # Re-install the stub in case a previous test evicted it from sys.modules.
+    sys.modules["langchain_chroma"] = _stub_chroma
     monkeypatch.setattr(rd, "get_openai_api_key", lambda: "test-key")
     rd.reset_vectorstore_cache()
     yield
@@ -42,22 +52,20 @@ def _isolate_cache(monkeypatch):
 
 
 def test_two_calls_return_same_object(monkeypatch):
-    monkeypatch.setattr(rd, "OpenAIEmbeddings", _FakeEmbeddings)
-    monkeypatch.setattr(rd, "Chroma", _FakeChroma)
-
-    first = rd.get_vectorstore()
-    second = rd.get_vectorstore()
+    with patch("langchain_openai.OpenAIEmbeddings", _FakeEmbeddings), \
+         patch("langchain_chroma.Chroma", _FakeChroma):
+        first = rd.get_vectorstore()
+        second = rd.get_vectorstore()
 
     assert first is second
 
 
 def test_reset_forces_reconstruction(monkeypatch):
-    monkeypatch.setattr(rd, "OpenAIEmbeddings", _FakeEmbeddings)
-    monkeypatch.setattr(rd, "Chroma", _FakeChroma)
-
-    first = rd.get_vectorstore()
-    rd.reset_vectorstore_cache()
-    second = rd.get_vectorstore()
+    with patch("langchain_openai.OpenAIEmbeddings", _FakeEmbeddings), \
+         patch("langchain_chroma.Chroma", _FakeChroma):
+        first = rd.get_vectorstore()
+        rd.reset_vectorstore_cache()
+        second = rd.get_vectorstore()
 
     assert first is not second
 
@@ -72,9 +80,6 @@ def test_concurrent_calls_construct_once(monkeypatch):
             with count_lock:
                 construction_count["n"] += 1
 
-    monkeypatch.setattr(rd, "OpenAIEmbeddings", _FakeEmbeddings)
-    monkeypatch.setattr(rd, "Chroma", _CountingChroma)
-
     results: list[object] = []
     results_lock = threading.Lock()
     barrier = threading.Barrier(5)
@@ -85,11 +90,13 @@ def test_concurrent_calls_construct_once(monkeypatch):
         with results_lock:
             results.append(store)
 
-    threads = [threading.Thread(target=worker) for _ in range(5)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    with patch("langchain_openai.OpenAIEmbeddings", _FakeEmbeddings), \
+         patch("langchain_chroma.Chroma", _CountingChroma):
+        threads = [threading.Thread(target=worker) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
     assert construction_count["n"] == 1
     assert len(results) == 5
@@ -104,11 +111,10 @@ def test_embeddings_not_reinstantiated(monkeypatch):
             super().__init__(*args, **kwargs)
             calls["n"] += 1
 
-    monkeypatch.setattr(rd, "OpenAIEmbeddings", _CountingEmbeddings)
-    monkeypatch.setattr(rd, "Chroma", _FakeChroma)
-
-    rd.get_vectorstore()
-    rd.get_vectorstore()
+    with patch("langchain_openai.OpenAIEmbeddings", _CountingEmbeddings), \
+         patch("langchain_chroma.Chroma", _FakeChroma):
+        rd.get_vectorstore()
+        rd.get_vectorstore()
 
     assert calls["n"] == 1
 
@@ -121,10 +127,9 @@ def test_chroma_not_reinstantiated(monkeypatch):
             super().__init__(*args, **kwargs)
             calls["n"] += 1
 
-    monkeypatch.setattr(rd, "OpenAIEmbeddings", _FakeEmbeddings)
-    monkeypatch.setattr(rd, "Chroma", _CountingChroma)
-
-    rd.get_vectorstore()
-    rd.get_vectorstore()
+    with patch("langchain_openai.OpenAIEmbeddings", _FakeEmbeddings), \
+         patch("langchain_chroma.Chroma", _CountingChroma):
+        rd.get_vectorstore()
+        rd.get_vectorstore()
 
     assert calls["n"] == 1

@@ -7,11 +7,25 @@ stale results after an upload, document delete, or tenant delete.
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
+import types
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+# Stub langchain_chroma before any src.rag imports (not installed in test env).
+_stub_chroma = types.ModuleType("langchain_chroma")
+_stub_chroma.Chroma = MagicMock()
+sys.modules.setdefault("langchain_chroma", _stub_chroma)
+
+
+@pytest.fixture(autouse=True)
+def _reinstall_chroma_stub():
+    """Re-install the stub in case a previous file's fixture evicted it."""
+    sys.modules["langchain_chroma"] = _stub_chroma
+    yield
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +93,7 @@ def test_build_tenant_index_invalidates_bm25(tmp_path, monkeypatch):
     monkeypatch.setattr(ingest_mod, "invalidate_bm25_cache", _fake_invalidate)
 
     # Patch the expensive Chroma.from_documents call
-    with patch.object(ingest_mod, "OpenAIEmbeddings", return_value=object()), \
+    with patch("langchain_openai.OpenAIEmbeddings", return_value=object()), \
          patch("langchain_chroma.Chroma.from_documents", return_value=None), \
          patch.object(ingest_mod, "_release_chroma"):
 

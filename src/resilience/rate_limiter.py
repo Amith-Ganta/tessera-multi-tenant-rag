@@ -37,20 +37,23 @@ class RateLimiter:
         redis_url:  overrides REDIS_URL from config when provided.
     """
 
+    _UNSET = object()  # sentinel: client not yet initialised
+
     def __init__(self, limit: int | None = None, key_prefix: str = "rl:", redis_url: str | None = None) -> None:
         from src.rag.config import RATE_LIMIT_PER_MINUTE, REDIS_URL
         self._limit = limit if limit is not None else RATE_LIMIT_PER_MINUTE
         self._prefix = key_prefix
         self._redis_url = redis_url or REDIS_URL
-        self._client = None
+        self._client = self._UNSET  # not yet initialised
 
     def _get_client(self):
-        if self._client is None:
+        if self._client is self._UNSET:
             try:
                 import redis as _r
                 self._client = _r.Redis.from_url(self._redis_url, decode_responses=True)
             except Exception as exc:
                 logger.warning("RateLimiter: Redis init failed: %s", exc)
+                self._client = None
         return self._client
 
     def check(self, identifier: str) -> int:

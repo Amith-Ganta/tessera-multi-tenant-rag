@@ -24,6 +24,25 @@ from pathlib import Path
 
 import pytest
 
+# Skip the entire file when langchain_chroma is not installed (host Python).
+# These tests require the real Chroma package (writes SQLite files to disk)
+# and are designed to run inside Docker where the package is available.
+#
+# Detection strategy: import chromadb (the underlying C package). If that
+# succeeds, the real langchain_chroma is available. We do NOT check
+# langchain_chroma directly because other test files stub it in sys.modules
+# via sys.modules.setdefault, making it appear importable even on host Python.
+try:
+    import chromadb as _chromadb  # noqa: F401
+    _LANGCHAIN_CHROMA_AVAILABLE = True
+except ImportError:
+    _LANGCHAIN_CHROMA_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(
+    not _LANGCHAIN_CHROMA_AVAILABLE,
+    reason="langchain_chroma not installed in this environment (runs in Docker)",
+)
+
 
 # ---------------------------------------------------------------------------
 # Isolation fixture — ensure the real langchain_chroma is used in this file.
@@ -41,6 +60,10 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _use_real_langchain_chroma():
+    if not _LANGCHAIN_CHROMA_AVAILABLE:
+        # Package not installed; tests are skipped via pytestmark — just yield.
+        yield
+        return
     _saved = sys.modules.get("langchain_chroma")
     # Remove any stub so importlib.import_module picks up the real package.
     sys.modules.pop("langchain_chroma", None)

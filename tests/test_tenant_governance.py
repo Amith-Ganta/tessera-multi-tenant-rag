@@ -5,6 +5,7 @@ All tests use fakeredis so no real Redis is needed.
 
 import fakeredis
 import pytest
+from unittest.mock import MagicMock
 
 from src.resilience.tenant_governance import TenantGovernor
 
@@ -33,8 +34,11 @@ class TestTokenBudget:
         assert result is False
 
     def test_fail_closed_on_redis_error(self):
-        g = TenantGovernor(redis_url="redis://127.0.0.1:0/0")
-        # Connection to port 0 will fail immediately
+        g = TenantGovernor()
+        # Inject a client whose every command raises ConnectionError (simulates Redis down).
+        broken = MagicMock()
+        broken.incrby.side_effect = ConnectionError("Redis unavailable")
+        g.inject_client(broken)
         result = g.check_token_budget("tenant-x", 10)
         assert result is False
 

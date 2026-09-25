@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from deepeval.models import DeepEvalBaseLLM
-
 from .config import CHAT_MODEL
 from .llm import complete as llm_complete
 
+try:
+    from deepeval.models import DeepEvalBaseLLM as _Base  # deepeval may not be installed
+except ImportError:
+    _Base = object  # type: ignore[assignment,misc]
 
-class DeepSeekJudge(DeepEvalBaseLLM):
+
+class DeepSeekJudge(_Base):  # type: ignore[valid-type]
     """DeepEval judge that calls DeepSeek through the canonical LLM gateway."""
 
     def load_model(self) -> object:
