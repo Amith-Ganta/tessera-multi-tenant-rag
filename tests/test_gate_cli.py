@@ -31,7 +31,11 @@ from evals.gate import run_gate, main as gate_main
 
 def _passing_report() -> dict:
     return {
-        "aggregates": {"mean_relevancy": 0.9, "mean_correctness": 0.8},
+        "aggregates": {
+            "mean_relevancy": 0.9,
+            "mean_correctness": 0.8,
+            "mean_correctness_vector": 0.8,
+        },
         "performance": {
             "latency_p95_ms": 500.0,
             "error_rate": 0.01,
@@ -126,7 +130,11 @@ class TestGateFailClosed:
 
     def test_all_metrics_present_and_bad_fails_gate(self):
         report = {
-            "aggregates": {"mean_relevancy": 0.0, "mean_correctness": 0.0},
+            "aggregates": {
+                "mean_relevancy": 0.0,
+                "mean_correctness": 0.0,
+                "mean_correctness_vector": 0.0,
+            },
             "performance": {
                 "latency_p95_ms": 999999.0,
                 "error_rate": 1.0,
@@ -164,6 +172,40 @@ class TestGateFailClosed:
         assert isinstance(r["passed"], bool)
         r2 = run_gate(_failing_report())
         assert isinstance(r2["passed"], bool)
+
+    def test_gate_uses_vector_correctness_not_mixed(self):
+        """Gate must pass when vector-route correctness ≥ threshold even if
+        mixed mean_correctness is low (direct-route items drag it down)."""
+        report = {
+            "aggregates": {
+                "mean_relevancy": 0.9,
+                "mean_correctness": 0.3,        # mixed — below threshold
+                "mean_correctness_vector": 0.75,  # vector-only — above threshold
+            },
+        }
+        r = run_gate(report)
+        correctness_check = next(
+            c for c in r["checks"] if c["name"] == "mean_correctness_vector"
+        )
+        assert correctness_check["passed"] is True, (
+            "Gate must check mean_correctness_vector, not mean_correctness"
+        )
+
+    def test_gate_fails_when_vector_correctness_below_threshold(self):
+        """Gate must fail when vector-route correctness falls below 0.5."""
+        report = {
+            "aggregates": {
+                "mean_relevancy": 0.9,
+                "mean_correctness": 0.8,
+                "mean_correctness_vector": 0.3,  # vector-route below threshold
+            },
+        }
+        r = run_gate(report)
+        assert r["passed"] is False
+        correctness_check = next(
+            c for c in r["checks"] if c["name"] == "mean_correctness_vector"
+        )
+        assert correctness_check["passed"] is False
 
 
 # ---------------------------------------------------------------------------
