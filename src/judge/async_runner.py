@@ -166,8 +166,13 @@ def submit_judge(
             )
             return {"status": "unavailable", "reason": "queue_unavailable"}
     else:
-        asyncio.create_task(
-            _run_judge(trace_id, question, answer, contexts, evaluate_fn, cache_key, cache_payload),
-            name=f"judge-{trace_id}",
-        )
+        coro = _run_judge(trace_id, question, answer, contexts, evaluate_fn, cache_key, cache_payload)
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(coro, name=f"judge-{trace_id}")
+        except RuntimeError:
+            # No running event loop (e.g. called from a non-async context or tests).
+            # Close the coroutine immediately to suppress ResourceWarning.
+            coro.close()
+            logger.debug("submit_judge: no running loop; judge skipped trace_id=%s", trace_id)
         return {"status": "pending", "trace_id": trace_id}
