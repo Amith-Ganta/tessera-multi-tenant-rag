@@ -25,9 +25,12 @@ def test_app_imports_without_secrets(monkeypatch):
     monkeypatch.setenv("TESSERA_ENV", "dev")
 
     # Remove any cached import so monkeypatched env takes effect.
+    # Use monkeypatch.delitem so the originals are restored on teardown,
+    # preventing the fresh re-import from replacing the module that other
+    # test files already imported at collection time.
     for mod_name in list(sys.modules):
         if mod_name == "src.api.app" or mod_name.startswith("src.api.app."):
-            del sys.modules[mod_name]
+            monkeypatch.delitem(sys.modules, mod_name)
 
     # This must not raise.
     from src.api.app import app  # noqa: F401
