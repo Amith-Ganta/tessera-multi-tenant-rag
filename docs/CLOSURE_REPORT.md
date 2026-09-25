@@ -185,9 +185,20 @@ Coverage by concern:
 
 ---
 
+## CI status
+
+| Job | Status | Notes |
+|---|---|---|
+| lint | green | commit 25f8bb4 |
+| regression-tests | green | 705 passed, 8 skipped, exit 0 |
+| eval-gate | red | DEEPSEEK_API_KEY and OPENAI_API_KEY repo secrets are invalid; the key values stored in GitHub contain malformed shell syntax. Code is correct -- fix requires rotating valid secrets in GitHub repo settings. |
+
+---
+
 ## Commit record
 
-48 commits were pushed in the final closure session (Tasks 0–4). The repository has a
+48 commits were pushed in the final closure session (Tasks 0--4), plus 4 CI-fix commits
+(a75a291, ef8f4ba, 25f8bb4 -- one more for this report). The repository has a
 clean main branch with no force-pushes and no skipped hooks.
 
 ---
