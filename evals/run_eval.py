@@ -178,9 +178,15 @@ def main() -> int:
             }
         )
 
-    # Correctness over vector-route items only: direct-route bypasses retrieval entirely,
-    # so its correctness measures open-ended LLM quality, not RAG quality.  The gate uses
-    # mean_correctness_vector so RAG regressions are not masked by direct-route noise.
+    # Vector-route-only aggregates: direct-route bypasses retrieval entirely, so its
+    # relevancy and correctness measure open-ended LLM quality, not RAG quality.  The
+    # gate uses _vector variants so RAG regressions are not masked by direct-route noise.
+    vector_relevancy_scores = [
+        row["relevancy"]["score"]
+        for row in case_rows
+        if row["route"] == "vector"
+        and row["relevancy"].get("score") is not None
+    ]
     vector_correctness_scores = [
         row["correctness"]["score"]
         for row in case_rows
@@ -191,6 +197,7 @@ def main() -> int:
     aggregate_rows = {
         "count": len(case_rows),
         "mean_relevancy": _safe_mean(relevancy_scores),
+        "mean_relevancy_vector": _safe_mean(vector_relevancy_scores),
         "mean_correctness": _safe_mean(correctness_scores),
         "mean_correctness_vector": _safe_mean(vector_correctness_scores),
         "mean_faithfulness": _safe_mean(faithfulness_scores),

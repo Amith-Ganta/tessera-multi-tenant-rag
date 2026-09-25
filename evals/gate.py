@@ -72,8 +72,8 @@ def run_gate(report: dict[str, Any]) -> dict[str, Any]:
             return None
 
     checks = [
-        _check("mean_relevancy",
-               _float(aggregates, "mean_relevancy"),
+        _check("mean_relevancy_vector",
+               _float(aggregates, "mean_relevancy_vector"),
                MIN_MEAN_RELEVANCY, "ge"),
         _check("mean_correctness_vector",
                _float(aggregates, "mean_correctness_vector"),

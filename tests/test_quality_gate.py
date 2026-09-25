@@ -21,6 +21,8 @@ def _report(
     aggregates: dict = {}
     if mean_relevancy is not None:
         aggregates["mean_relevancy"] = mean_relevancy
+        # gate checks mean_relevancy_vector; mirror so tests cover the real check name
+        aggregates["mean_relevancy_vector"] = mean_relevancy
     if mean_correctness is not None:
         aggregates["mean_correctness"] = mean_correctness
         # gate checks mean_correctness_vector; mirror the value so tests cover
@@ -66,7 +68,7 @@ class TestThresholdLogic:
     def test_fails_when_relevancy_below_floor(self):
         result = run_gate(_report(mean_relevancy=0.3, mean_correctness=0.8))
         assert result["passed"] is False
-        relevancy_check = next(c for c in result["checks"] if c["name"] == "mean_relevancy")
+        relevancy_check = next(c for c in result["checks"] if c["name"] == "mean_relevancy_vector")
         assert relevancy_check["passed"] is False
 
     def test_fails_when_latency_exceeds_ceiling(self):

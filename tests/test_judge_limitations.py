@@ -35,6 +35,7 @@ def _full_report(
     return {
         "aggregates": {
             "mean_relevancy": relevancy,
+            "mean_relevancy_vector": relevancy,
             "mean_correctness": correctness,
             "mean_correctness_vector": correctness,
         },
@@ -50,14 +51,14 @@ class TestGateBoundaryValues:
     def test_exactly_at_relevancy_floor_passes(self):
         from src.rag.config import MIN_MEAN_RELEVANCY
         r = run_gate(_full_report(MIN_MEAN_RELEVANCY, 0.8, 1000, 0.01, 0.001))
-        rcheck = next(c for c in r["checks"] if c["name"] == "mean_relevancy")
+        rcheck = next(c for c in r["checks"] if c["name"] == "mean_relevancy_vector")
         assert rcheck["passed"] is True
 
     def test_one_ulp_below_relevancy_floor_fails(self):
         from src.rag.config import MIN_MEAN_RELEVANCY
         val = MIN_MEAN_RELEVANCY - 0.001
         r = run_gate(_full_report(val, 0.8, 1000, 0.01, 0.001))
-        rcheck = next(c for c in r["checks"] if c["name"] == "mean_relevancy")
+        rcheck = next(c for c in r["checks"] if c["name"] == "mean_relevancy_vector")
         assert rcheck["passed"] is False
 
     def test_exactly_at_correctness_floor_passes(self):
@@ -100,15 +101,15 @@ class TestGateEdgeCases:
 
     def test_null_aggregates_skips_those_checks(self):
         r = run_gate({"aggregates": None, "performance": {"latency_p95_ms": 500}})
-        rel = next(c for c in r["checks"] if c["name"] == "mean_relevancy")
+        rel = next(c for c in r["checks"] if c["name"] == "mean_relevancy_vector")
         assert rel["skipped"] is True
 
     def test_non_numeric_value_is_treated_as_missing_and_skipped(self):
         r = run_gate({
-            "aggregates": {"mean_relevancy": "not-a-number"},
+            "aggregates": {"mean_relevancy_vector": "not-a-number"},
             "performance": {},
         })
-        rel = next(c for c in r["checks"] if c["name"] == "mean_relevancy")
+        rel = next(c for c in r["checks"] if c["name"] == "mean_relevancy_vector")
         assert rel["skipped"] is True
 
     def test_single_failing_metric_fails_gate(self):

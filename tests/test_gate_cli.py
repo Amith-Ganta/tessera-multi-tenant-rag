@@ -33,6 +33,7 @@ def _passing_report() -> dict:
     return {
         "aggregates": {
             "mean_relevancy": 0.9,
+            "mean_relevancy_vector": 0.9,
             "mean_correctness": 0.8,
             "mean_correctness_vector": 0.8,
         },
@@ -46,7 +47,8 @@ def _passing_report() -> dict:
 
 def _failing_report() -> dict:
     r = _passing_report()
-    r["aggregates"]["mean_relevancy"] = 0.1  # below MIN_MEAN_RELEVANCY
+    r["aggregates"]["mean_relevancy"] = 0.1        # below MIN_MEAN_RELEVANCY
+    r["aggregates"]["mean_relevancy_vector"] = 0.1  # gate checks this key
     return r
 
 
@@ -147,8 +149,8 @@ class TestGateFailClosed:
 
     def test_corrupt_value_skipped_not_passed(self):
         """A non-numeric value is skipped (not treated as passing)."""
-        r = run_gate({"aggregates": {"mean_relevancy": None}})
-        rel = next(c for c in r["checks"] if c["name"] == "mean_relevancy")
+        r = run_gate({"aggregates": {"mean_relevancy_vector": None}})
+        rel = next(c for c in r["checks"] if c["name"] == "mean_relevancy_vector")
         assert rel["skipped"] is True
         assert rel["passed"] is True  # skipped defaults to passed=True per design
 
