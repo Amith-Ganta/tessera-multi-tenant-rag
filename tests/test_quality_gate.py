@@ -23,6 +23,9 @@ def _report(
         aggregates["mean_relevancy"] = mean_relevancy
     if mean_correctness is not None:
         aggregates["mean_correctness"] = mean_correctness
+        # gate checks mean_correctness_vector; mirror the value so tests cover
+        # the real check name without changing every test's intent
+        aggregates["mean_correctness_vector"] = mean_correctness
 
     perf: dict = {}
     if latency_p95_ms is not None:
