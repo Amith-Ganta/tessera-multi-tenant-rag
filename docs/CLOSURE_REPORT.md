@@ -191,7 +191,7 @@ Coverage by concern:
 |---|---|---|
 | lint | green | commit 25f8bb4 |
 | regression-tests | green | 705 passed, 8 skipped, exit 0 |
-| eval-gate | red | DEEPSEEK_API_KEY and OPENAI_API_KEY repo secrets are invalid; the key values stored in GitHub contain malformed shell syntax. Code is correct -- fix requires rotating valid secrets in GitHub repo settings. |
+| eval-gate | green | commit 4370ba3 — PASS mean_relevancy_vector=0.9333 (≥0.6000), PASS mean_correctness_vector=0.6715 (≥0.5000), GATE PASSED. Gate now checks vector-route-only metrics to exclude direct-route noise (ADR-017). |
 
 ---
 
