@@ -68,7 +68,7 @@ jobs:
         run: uv sync --dev
 
       - name: Dependency vulnerability scan (pip-audit)
-        run: uv run pip-audit --strict --progress-spinner off
+        run: uvx pip-audit --strict --progress-spinner off
 
       - name: Run regression test suite
         env:
