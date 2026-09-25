@@ -15,7 +15,7 @@ from unittest.mock import patch
 def test_build_versions_default_no_canary():
     from src.api.app import _VERSIONS, _build_versions
 
-    with patch("src.rag.llm.select_model", return_value="deepseek/deepseek-flash"):
+    with patch("src.rag.llm.select_model", return_value=_VERSIONS["model"]):
         result = _build_versions()
 
     assert result is _VERSIONS, "should return singleton when canary not active"
