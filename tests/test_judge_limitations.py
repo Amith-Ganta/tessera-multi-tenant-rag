@@ -33,7 +33,11 @@ def _full_report(
     cost: float,
 ) -> dict:
     return {
-        "aggregates": {"mean_relevancy": relevancy, "mean_correctness": correctness},
+        "aggregates": {
+            "mean_relevancy": relevancy,
+            "mean_correctness": correctness,
+            "mean_correctness_vector": correctness,
+        },
         "performance": {
             "latency_p95_ms": latency,
             "error_rate": error_rate,
@@ -59,7 +63,7 @@ class TestGateBoundaryValues:
     def test_exactly_at_correctness_floor_passes(self):
         from src.rag.config import MIN_MEAN_CORRECTNESS
         r = run_gate(_full_report(0.9, MIN_MEAN_CORRECTNESS, 1000, 0.01, 0.001))
-        ccheck = next(c for c in r["checks"] if c["name"] == "mean_correctness")
+        ccheck = next(c for c in r["checks"] if c["name"] == "mean_correctness_vector")
         assert ccheck["passed"] is True
 
     def test_exactly_at_latency_ceiling_passes(self):
@@ -112,9 +116,9 @@ class TestGateEdgeCases:
         assert r["passed"] is False
 
     def test_skipped_checks_do_not_count_as_failures(self):
-        """A report with only correctness present: correctness check passes; rest skipped."""
-        r = run_gate({"aggregates": {"mean_correctness": 0.9}, "performance": {}})
-        correct_check = next(c for c in r["checks"] if c["name"] == "mean_correctness")
+        """A report with only vector correctness present: that check passes; rest skipped."""
+        r = run_gate({"aggregates": {"mean_correctness_vector": 0.9}, "performance": {}})
+        correct_check = next(c for c in r["checks"] if c["name"] == "mean_correctness_vector")
         assert correct_check["passed"] is True
         assert r["passed"] is True
 
